@@ -1,0 +1,42 @@
+{
+  "name": "@digitalcredentials/verifier-plugin",
+  "version": "0.0.0",
+  "description": "A credential viewer and verifier for the DCC web wallet.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && tsc -b",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "oxlint",
+    "test:browser": "playwright test",
+    "fixtures": "node scripts/make-fixtures.js"
+  },
+  "dependencies": {
+    "@digitalcredentials/verifier-core": "1.0.0-beta.11"
+  },
+  "devDependencies": {
+    "@digitalcredentials/ed25519-signature-2020": "^6.0.0",
+    "@digitalcredentials/ed25519-verification-key-2020": "^4.0.0",
+    "@digitalcredentials/security-document-loader": "^6.0.0",
+    "@digitalcredentials/vc": "^9.0.1",
+    "@digitalcredentials/vc-bitstring-status-list": "^1.0.0",
+    "@playwright/test": "^1.63.0",
+    "oxlint": "^1.75.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.2.0",
+    "vitest": "^3.2.4"
+  }
+}

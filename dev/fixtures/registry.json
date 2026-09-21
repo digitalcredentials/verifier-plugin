@@ -1,0 +1,16 @@
+{
+  "meta": {
+    "created": "2026-09-21T00:00:00Z",
+    "updated": "2026-09-21T00:00:00Z",
+    "note": "Local development registry. Not a real one."
+  },
+  "registry": {
+    "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z": {
+      "name": "Springfield College",
+      "location": {
+        "country": "US"
+      },
+      "url": "https://springfield.example.edu"
+    }
+  }
+}

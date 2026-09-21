@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>verifier-plugin dev</title>
+  <style>
+    body { font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+           background: #f5f6f8; color: #16202e; margin: 0; padding: 32px 20px 80px; }
+    .wrap { max-width: 540px; margin: 0 auto; }
+    h1 { font-size: 1.2rem; margin: 0 0 4px; }
+    p.note { color: #6e7a8f; font-size: .9rem; margin: 0 0 20px; }
+    .switch { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 18px; }
+    .switch button { font: inherit; font-size: .78rem; padding: 7px 11px; cursor: pointer;
+      border: 1px solid #bfc8d6; background: #fff; color: #47536a; border-radius: 5px; }
+    .switch button:hover { border-color: #24476f; color: #24476f; }
+    .switch button[aria-pressed="true"] { background: #24476f; border-color: #24476f; color: #fff; }
+    #log { margin-top: 22px; font-family: ui-monospace, Menlo, monospace; font-size: .76rem;
+           color: #47536a; white-space: pre-wrap; background: #fff; border: 1px solid #d9dee7;
+           border-radius: 8px; padding: 12px; max-height: 220px; overflow: auto; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>verifier-plugin</h1>
+    <p class="note">Real credentials, really signed, really verified. Pick a situation.</p>
+    <div class="switch" id="switch" role="group" aria-label="Situation"></div>
+    <p class="note" id="note"></p>
+    <verifier-credential id="vc"></verifier-credential>
+    <div id="log">waiting…</div>
+  </div>
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>
