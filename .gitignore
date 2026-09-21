@@ -64,3 +64,8 @@ jspm_packages/
 
 playwright-report/
 test-results/
+# Build output
+dist
+test-results
+playwright-report
+*.tsbuildinfo
