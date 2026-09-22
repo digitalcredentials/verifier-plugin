@@ -436,15 +436,28 @@ export const summarise = (r: VerificationResponse): Outcome => {
   // actually do something about.
   const schema = schemaFinding(r);
   if (schema.state === 'invalid') {
+    // The finding leads, but the reassurance beside it must not outrun the
+    // checks that actually reported. "It's genuine and hasn't been withdrawn"
+    // above a breakdown saying the signature was never checked, or the
+    // withdrawal list never loaded, is precisely the contradiction this file
+    // exists to prevent — and since status lists do not load in a browser
+    // today, that second case is the common path and not an edge.
+    const notWithdrawn = !hasStatusList(r) || passed(revocation);
+    const reassurance = !passed(signature)
+      ? ''
+      : notWithdrawn
+        ? " Nothing has changed since it was issued, and the issuer hasn't withdrawn it."
+        : ' Nothing has changed since it was issued.';
     return {
       severity: 'warning',
       code: 'malformed',
       headline: schema.missingOnly
         ? 'This credential is missing information it should have'
         : "This credential wasn't built the way it should have been",
-      detail: schema.missingOnly
-        ? "It's genuine and hasn't been withdrawn, but it leaves out details that credentials of this kind are required to carry."
-        : "It's genuine and hasn't been withdrawn, but parts of it don't match the standard for this kind of credential.",
+      detail:
+        (schema.missingOnly
+          ? 'It leaves out details that credentials of this kind are required to carry.'
+          : "Parts of it don't match the standard for this kind of credential.") + reassurance,
       // Nate Otto, 22 September: "None of these are errors that the user who
       // holds the credential could resolve themselves." Naming a task the
       // reader cannot perform is worse than naming none, so the action says
@@ -467,7 +480,13 @@ export const summarise = (r: VerificationResponse): Outcome => {
     };
   }
 
-  if (issuer.unreachable.length > 0) {
+  // An unreachable registry only leaves us in doubt if nothing else answered.
+  // verifier-core sets `valid` from whether any registry matched and attaches
+  // `uncheckedRegistries` independently, so with more than one registry both
+  // can be true at once — and then we do know who issued this. Saying we
+  // could not confirm it would contradict the issuer row, which reads
+  // "found in ...".
+  if (issuer.unreachable.length > 0 && !passed(steps.get(STEP.registeredIssuer))) {
     const which =
       issuer.unreachable.length === 1
         ? `The ${issuer.unreachable[0]} didn't load.`

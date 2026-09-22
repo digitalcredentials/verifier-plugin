@@ -20,13 +20,17 @@ import type { VerificationResponse, VerificationStep } from '../src/types.js';
 type Sig = 'passed' | 'failed' | 'missing';
 type Rev = 'passed' | 'failed' | 'errored' | 'none';
 type Exp = 'passed' | 'failed' | 'missing';
-type Iss = 'matched' | 'unlisted' | 'unreachable';
+// `matched+unreachable` is the combination the first three missed: one
+// registry recognised the issuer while another could not be reached. Both
+// fields are set independently by verifier-core, so it is reachable with any
+// two registries — and it hid a contradiction for two code reviews.
+type Iss = 'matched' | 'unlisted' | 'unreachable' | 'matched+unreachable';
 type Sch = 'valid' | 'invalid' | 'none' | 'unavailable';
 
 const SIGNATURES: Sig[] = ['passed', 'failed', 'missing'];
 const REVOCATIONS: Rev[] = ['passed', 'failed', 'errored', 'none'];
 const EXPIRATIONS: Exp[] = ['passed', 'failed', 'missing'];
-const ISSUERS: Iss[] = ['matched', 'unlisted', 'unreachable'];
+const ISSUERS: Iss[] = ['matched', 'unlisted', 'unreachable', 'matched+unreachable'];
 const SCHEMAS: Sch[] = ['valid', 'invalid', 'none', 'unavailable'];
 
 /** What verifier-core files under `additionalInformation`, per state. */
@@ -70,19 +74,24 @@ const build = (sig: Sig, rev: Rev, exp: Exp, iss: Iss, sch: Sch): VerificationRe
     log.push({ id: 'revocation_status', error: { name: 'status_list_not_found', message: 'x' } });
   }
 
+  const didMatch = iss === 'matched' || iss === 'matched+unreachable';
   log.push({
     id: 'registered_issuer',
-    valid: iss === 'matched',
-    matchingIssuers:
-      iss === 'matched'
-        ? [
-            {
-              issuer: { federation_entity: { organization_name: 'Springfield College' } },
-              registry: { federation_entity: { organization_name: 'DCC Registry' } },
-            },
-          ]
+    // verifier-core sets this from whether any registry matched, and attaches
+    // uncheckedRegistries separately. They are not mutually exclusive.
+    valid: didMatch,
+    matchingIssuers: didMatch
+      ? [
+          {
+            issuer: { federation_entity: { organization_name: 'Springfield College' } },
+            registry: { federation_entity: { organization_name: 'DCC Registry' } },
+          },
+        ]
+      : [],
+    uncheckedRegistries:
+      iss === 'unreachable' || iss === 'matched+unreachable'
+        ? [{ name: 'Second Registry' }]
         : [],
-    uncheckedRegistries: iss === 'unreachable' ? [{ name: 'DCC Registry' }] : [],
   });
 
   return {

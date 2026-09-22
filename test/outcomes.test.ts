@@ -618,3 +618,74 @@ describe('having no schema to check against', () => {
     });
   });
 });
+
+describe('the reassurance beside a finding never outruns the checks', () => {
+  // Found in review. "It's genuine and hasn't been withdrawn" was fixed text,
+  // so it appeared above a breakdown that said the signature was never
+  // checked, or the withdrawal list never loaded. Since status lists do not
+  // load in a browser today, the second was the common path.
+  const withBad = (mutate: (r: VerificationResponse) => void): VerificationResponse => {
+    const r = withSchema(missingProperty);
+    mutate(r);
+    return r;
+  };
+
+  it('claims both only when both actually reported', () => {
+    const detail = summarise(withSchema(missingProperty)).detail;
+    expect(detail).toContain('Nothing has changed since it was issued');
+    expect(detail).toContain("issuer hasn't withdrawn it");
+  });
+
+  it("does not claim it was not withdrawn when the list didn't load", () => {
+    const r = withBad((x) => {
+      x.log = x.log!.filter((s) => s.id !== 'revocation_status');
+      x.log.push({ id: 'revocation_status', error: { name: 'status_list_not_found', message: 'x' } });
+    });
+    expect(summarise(r).detail).not.toContain('withdrawn');
+    // ...but the part that did report is still said.
+    expect(summarise(r).detail).toContain('Nothing has changed since it was issued');
+  });
+
+  it('claims nothing about the signature when the signature never reported', () => {
+    const r = withBad((x) => {
+      x.log = x.log!.filter((s) => s.id !== 'valid_signature');
+    });
+    const detail = summarise(r).detail;
+    expect(detail).not.toContain('Nothing has changed');
+    expect(detail).not.toContain('withdrawn');
+    expect(detail).toContain('leaves out details');
+  });
+});
+
+describe('an unreachable registry when another one answered', () => {
+  // Found in review, and present since the first slice. verifier-core sets
+  // `valid` from whether any registry matched and attaches
+  // `uncheckedRegistries` independently, so both are true with two
+  // registries — and the headline said "we couldn't confirm who issued this"
+  // above a row reading "found in DCC Registry".
+  const matchedAndUnreachable = (): VerificationResponse => {
+    const r = ok();
+    r.log![3] = {
+      id: 'registered_issuer',
+      valid: true,
+      matchingIssuers: [
+        {
+          issuer: { federation_entity: { organization_name: 'Springfield College' } },
+          registry: { federation_entity: { organization_name: 'DCC Registry' } },
+        },
+      ],
+      uncheckedRegistries: [{ name: 'Second Registry' }],
+    };
+    return r;
+  };
+
+  it('does not claim the issuer is unconfirmed when a registry confirmed them', () => {
+    expect(summarise(matchedAndUnreachable()).code).toBe('verified');
+  });
+
+  it('agrees with the row, which says the issuer was found', () => {
+    const row = listChecks(matchedAndUnreachable()).find((c) => c.id === 'registered_issuer');
+    expect(row!.severity).toBe('success');
+    expect(row!.value).toContain('found in');
+  });
+});
