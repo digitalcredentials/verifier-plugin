@@ -21,13 +21,44 @@ type Sig = 'passed' | 'failed' | 'missing';
 type Rev = 'passed' | 'failed' | 'errored' | 'none';
 type Exp = 'passed' | 'failed' | 'missing';
 type Iss = 'matched' | 'unlisted' | 'unreachable';
+type Sch = 'valid' | 'invalid' | 'none' | 'unavailable';
 
 const SIGNATURES: Sig[] = ['passed', 'failed', 'missing'];
 const REVOCATIONS: Rev[] = ['passed', 'failed', 'errored', 'none'];
 const EXPIRATIONS: Exp[] = ['passed', 'failed', 'missing'];
 const ISSUERS: Iss[] = ['matched', 'unlisted', 'unreachable'];
+const SCHEMAS: Sch[] = ['valid', 'invalid', 'none', 'unavailable'];
 
-const build = (sig: Sig, rev: Rev, exp: Exp, iss: Iss): VerificationResponse => {
+/** What verifier-core files under `additionalInformation`, per state. */
+const schemaEntry = (sch: Sch) => {
+  const schema = 'https://purl.imsglobal.org/spec/ob/v3p0/schema/json/x.json';
+  const source = 'Assumed based on vc.type';
+  switch (sch) {
+    case 'valid':
+      return { id: 'schema_check', results: [{ schema, result: { valid: true }, source }] };
+    case 'invalid':
+      return {
+        id: 'schema_check',
+        results: [
+          {
+            schema,
+            result: {
+              valid: false,
+              errors: [{ keyword: 'required', message: "must have required property 'validFrom'" }],
+            },
+            source,
+          },
+        ],
+      };
+    // Both of these arrive as a bare string, not a list. See types.ts.
+    case 'none':
+      return { id: 'schema_check', results: 'NO_SCHEMA' };
+    case 'unavailable':
+      return { id: 'schema_check', results: 'INVALID_SCHEMA - possibly not a valid url' };
+  }
+};
+
+const build = (sig: Sig, rev: Rev, exp: Exp, iss: Iss, sch: Sch): VerificationResponse => {
   const log: VerificationStep[] = [];
 
   if (sig !== 'missing') log.push({ id: 'valid_signature', valid: sig === 'passed' });
@@ -61,36 +92,54 @@ const build = (sig: Sig, rev: Rev, exp: Exp, iss: Iss): VerificationResponse => 
       ...(rev === 'none' ? {} : { credentialStatus: { type: 'BitstringStatusListEntry' } }),
     },
     log,
+    additionalInformation: [schemaEntry(sch)],
   };
 };
 
 const cases = SIGNATURES.flatMap((sig) =>
   REVOCATIONS.flatMap((rev) =>
     EXPIRATIONS.flatMap((exp) =>
-      ISSUERS.map((iss) => ({ sig, rev, exp, iss, name: `${sig}/${rev}/${exp}/${iss}` })),
+      ISSUERS.flatMap((iss) =>
+        SCHEMAS.map((sch) => ({
+          sig,
+          rev,
+          exp,
+          iss,
+          sch,
+          name: `${sig}/${rev}/${exp}/${iss}/${sch}`,
+        })),
+      ),
     ),
   ),
 );
 
 describe(`the headline and the breakdown agree (${cases.length} combinations)`, () => {
-  it.each(cases)('$name', ({ sig, rev, exp, iss }) => {
-    const r = build(sig, rev, exp, iss);
+  it.each(cases)('$name', ({ sig, rev, exp, iss, sch }) => {
+    const r = build(sig, rev, exp, iss, sch);
     const out = summarise(r);
     const rows = listChecks(r);
     const row = (id: string) => rows.find((c) => c.id === id);
-    const where = `${sig}/${rev}/${exp}/${iss} → ${out.code}`;
+    const where = `${sig}/${rev}/${exp}/${iss}/${sch} → ${out.code}`;
 
     expect(rows.length, `${where}: verification ran, so there must be rows`).toBeGreaterThan(0);
 
     // A clean verdict cannot sit above a row reporting a problem.
     if (out.severity === 'success') {
       for (const c of rows) {
-        // The one agreed exception: a credential the issuer provided no way to
-        // withdraw. Nothing failed and there was nothing to try, so the row
-        // carries no information while the verdict is still a pass.
-        const agreedException = c.id === 'revocation_status' && !hasStatusList(r);
-        if (agreedException) {
-          expect(c.severity, `${where}: the no-withdrawal-list row`).toBe('unchecked');
+        // Two agreed exceptions, and they are the same exception twice:
+        // nothing failed and there was nothing to try, so the row carries no
+        // information while the verdict is still a pass. Both stay visible
+        // for an issuer debugging their own badge, who otherwise cannot tell
+        // "nothing to check against" apart from "checked and clean".
+        const noWithdrawalList = c.id === 'revocation_status' && !hasStatusList(r);
+        // Unlike the signature, the schema check never establishes that the
+        // credential is authentic — it only reports how it was assembled. Not
+        // having one therefore does not undermine a pass the way an unchecked
+        // signature would, and must not drag the headline down to "we
+        // couldn't finish checking this".
+        const noSchemaToCheck = c.id === 'schema_check' && sch !== 'valid';
+        if (noWithdrawalList || noSchemaToCheck) {
+          expect(c.severity, `${where}: "${c.label}" under a pass`).toBe('unchecked');
           continue;
         }
         expect(c.severity, `${where}: "${c.label}" is ${c.severity} under a pass`).toBe('success');
@@ -108,6 +157,14 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
     if (out.severity === 'warning') {
       expect(worst, `${where}: a warning verdict needs a warning row`).toContain('warning');
     }
+    // A row must never report something more serious than the headline.
+    // "We couldn't check whether this was withdrawn" sitting above a row
+    // that says the credential was built wrong buries a definite finding
+    // under an unknown — the same bug as a pass above a problem, one tier
+    // down, and the tier the schema row newly made reachable.
+    if (out.severity === 'unchecked') {
+      expect(worst, `${where}: a warning row under an unchecked verdict`).not.toContain('warning');
+    }
 
     // Each verdict must be borne out by the row it is about.
     const expectations: Record<string, [string, string] | undefined> = {
@@ -118,6 +175,7 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
       withdrawn: ['revocation_status', 'error'],
       withdrawal_unknown: ['revocation_status', 'unchecked'],
       expired: ['expiration', 'warning'],
+      malformed: ['schema_check', 'warning'],
     };
     const expected = expectations[out.code];
     if (expected) {

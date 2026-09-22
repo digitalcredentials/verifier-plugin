@@ -1,0 +1,45 @@
+{
+  "@context": [
+    "https://www.w3.org/ns/credentials/v2",
+    "https://purl.imsglobal.org/spec/ob/v3p0/context-3.0.2.json",
+    "https://w3id.org/security/suites/ed25519-2020/v1"
+  ],
+  "id": "urn:uuid:8e5d2b71-0c46-4a93-b7e2-4f1a6c9d3058",
+  "type": [
+    "VerifiableCredential",
+    "OpenBadgeCredential"
+  ],
+  "issuer": {
+    "id": "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z",
+    "type": [
+      "Profile"
+    ],
+    "name": "Springfield College",
+    "url": "https://springfield.example.edu"
+  },
+  "validFrom": "2026-03-12T10:00:00Z",
+  "credentialSubject": {
+    "type": [
+      "AchievementSubject"
+    ],
+    "name": "Sam Salmon",
+    "achievement": {
+      "type": [
+        "Achievement"
+      ],
+      "achievementType": "Certificate",
+      "name": "Requirements Analysis Certificate",
+      "description": "Awarded for completing the requirements analysis programme.",
+      "criteria": {
+        "narrative": "Completed all coursework and the final assessment."
+      }
+    }
+  },
+  "proof": {
+    "type": "Ed25519Signature2020",
+    "created": "2026-09-22T20:35:17Z",
+    "verificationMethod": "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z#z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z",
+    "proofPurpose": "assertionMethod",
+    "proofValue": "z5co6U4RXNYawFSedC65UWTGSTVE87UeVQLFA3zWSucXYGjrKKAmgYVD1xbEtbtPH3h7KFJbgStqW8wUCoBAiQ8k2"
+  }
+}

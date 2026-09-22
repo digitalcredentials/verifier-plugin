@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { summarise, listChecks, issuerIdentity } from '../src/outcomes.js';
+import { summarise, listChecks, issuerIdentity, schemaFinding } from '../src/outcomes.js';
 import type { VerificationResponse } from '../src/types.js';
 
 /** A credential that can be withdrawn, so the revocation check applies. */
@@ -189,7 +189,7 @@ describe('listChecks', () => {
   });
 
   it('returns one row per check when verification ran', () => {
-    expect(listChecks(ok())).toHaveLength(4);
+    expect(listChecks(ok())).toHaveLength(5);
   });
 });
 
@@ -442,4 +442,179 @@ describe('findings from the second review', () => {
       }
     },
   );
+});
+
+// ---------------------------------------------------------------------------
+// How it was built
+// ---------------------------------------------------------------------------
+
+const SCHEMA = 'https://purl.imsglobal.org/spec/ob/v3p0/schema/json/x.json';
+
+/** verifier-core files this under `additionalInformation`, never in `log`. */
+const withSchema = (results: unknown): VerificationResponse => {
+  const r = ok();
+  r.additionalInformation = [{ id: 'schema_check', results } as never];
+  return r;
+};
+
+const missingProperty = [
+  {
+    schema: SCHEMA,
+    result: {
+      valid: false,
+      errors: [{ keyword: 'required', message: "must have required property 'validFrom'" }],
+    },
+    source: 'Assumed based on vc.type',
+  },
+];
+
+const wrongShape = [
+  {
+    schema: SCHEMA,
+    result: {
+      valid: false,
+      errors: [{ keyword: 'type', message: 'must be string', instancePath: '/issuer/name' }],
+    },
+    source: 'Assumed based on vc.type',
+  },
+];
+
+const passes = [{ schema: SCHEMA, result: { valid: true }, source: 'Assumed based on vc.type' }];
+
+describe('schemaFinding', () => {
+  it('reads a pass', () => {
+    expect(schemaFinding(withSchema(passes))).toEqual({ state: 'valid' });
+  });
+
+  it('separates missing fields from wrongly shaped ones', () => {
+    expect(schemaFinding(withSchema(missingProperty))).toEqual({
+      state: 'invalid',
+      missingOnly: true,
+    });
+    expect(schemaFinding(withSchema(wrongShape))).toEqual({ state: 'invalid', missingOnly: false });
+  });
+
+  // The declarations promise a list here. The runtime sends a bare string,
+  // and reading it as a list silently loses both of these states.
+  it('reads the bare strings the runtime actually returns', () => {
+    expect(schemaFinding(withSchema('NO_SCHEMA'))).toEqual({ state: 'no_schema' });
+    expect(schemaFinding(withSchema('INVALID_SCHEMA - possibly not a valid url'))).toEqual({
+      state: 'unavailable',
+    });
+  });
+
+  it('treats an absent entry as nothing to check against', () => {
+    expect(schemaFinding(ok())).toEqual({ state: 'no_schema' });
+  });
+
+  it('will not count a schema that reported neither pass nor fail as a pass', () => {
+    const r = withSchema([{ schema: SCHEMA, result: {}, source: 'x' }]);
+    expect(schemaFinding(r)).toEqual({ state: 'unavailable' });
+  });
+});
+
+describe('a credential the issuer built wrong', () => {
+  // The whole reason this outcome exists: verifier-core keeps the schema
+  // result out of `log`, so it never reaches `verified`. Everything the
+  // library calls a pass still passed here.
+  it('is surfaced even though verifier-core reports every check as passing', () => {
+    const r = withSchema(missingProperty);
+    expect(r.log!.every((s) => s.valid === true)).toBe(true);
+    expect(summarise(r).code).toBe('malformed');
+  });
+
+  it('is a warning, not an error — nothing here says it is fake', () => {
+    const out = summarise(withSchema(missingProperty));
+    expect(out.severity).toBe('warning');
+    expect(out.headline).toBe('This credential is missing information it should have');
+  });
+
+  it('says so differently when a field is present but the wrong shape', () => {
+    expect(summarise(withSchema(wrongShape)).headline).toBe(
+      "This credential wasn't built the way it should have been",
+    );
+  });
+
+  // Nate Otto, 22 September: "None of these are errors that the user who
+  // holds the credential could resolve themselves."
+  it('names whose job the fix is, and releases the holder from it', () => {
+    const out = summarise(withSchema(missingProperty));
+    expect(out.action).toContain('Springfield College');
+    expect(out.action).toContain("nothing for you to do");
+  });
+
+  it('shows the finding in the breakdown', () => {
+    const row = listChecks(withSchema(missingProperty)).find((c) => c.id === 'schema_check');
+    expect(row).toMatchObject({
+      label: 'How it was built',
+      severity: 'warning',
+      value: 'missing details the standard requires',
+    });
+  });
+});
+
+describe('what a schema failure does not outrank', () => {
+  const spoil = (results: unknown, id: string, step: object): VerificationResponse => {
+    const r = withSchema(results);
+    r.log = r.log!.map((s) => (s.id === id ? { id, ...step } : s));
+    return r;
+  };
+
+  it('yields to a broken signature, which is the more serious finding', () => {
+    expect(summarise(spoil(missingProperty, 'valid_signature', { valid: false })).code).toBe(
+      'invalid_signature',
+    );
+  });
+
+  it('yields to withdrawal', () => {
+    expect(summarise(spoil(missingProperty, 'revocation_status', { valid: false })).code).toBe(
+      'withdrawn',
+    );
+  });
+
+  // Expiry is the one the holder can actually act on, so it leads.
+  it('yields to expiry', () => {
+    expect(summarise(spoil(missingProperty, 'expiration', { valid: false })).code).toBe('expired');
+  });
+
+  // ...but a definite finding leads over anything we merely could not check.
+  it('leads over an issuer we could not confirm', () => {
+    const r = spoil(missingProperty, 'registered_issuer', {
+      valid: false,
+      matchingIssuers: [],
+      uncheckedRegistries: [],
+    });
+    expect(summarise(r).code).toBe('malformed');
+  });
+});
+
+describe('having no schema to check against', () => {
+  // A supplementary check that never ran must not drag down a verdict it
+  // never contributed to. This is the opposite call from the signature.
+  it.each(['NO_SCHEMA', 'INVALID_SCHEMA - possibly not a valid url'])(
+    'leaves a pass standing (%s)',
+    (results) => {
+      expect(summarise(withSchema(results)).code).toBe('verified');
+    },
+  );
+
+  it('still says so in the breakdown, for an issuer debugging their own badge', () => {
+    const row = (results: unknown) =>
+      listChecks(withSchema(results)).find((c) => c.id === 'schema_check');
+    expect(row('NO_SCHEMA')).toMatchObject({
+      severity: 'unchecked',
+      value: 'no standard was declared to check it against',
+    });
+    expect(row('INVALID_SCHEMA - possibly not a valid url')).toMatchObject({
+      severity: 'unchecked',
+      value: "couldn't load the standard to check it against",
+    });
+  });
+
+  it('reads as a pass when the schema did load and was clean', () => {
+    expect(listChecks(withSchema(passes)).find((c) => c.id === 'schema_check')).toMatchObject({
+      severity: 'success',
+      value: 'as the standard expects',
+    });
+  });
 });

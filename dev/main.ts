@@ -33,6 +33,7 @@ const SITUATIONS: Situation[] = [
   { label: 'Registry offline', file: 'verified', registries: OFFLINE_REGISTRY, note: "we couldn't reach the registry" },
   { label: 'Expired', file: 'expired', registries: LOCAL_REGISTRY, note: 'past its end date' },
   { label: 'Withdrawn', file: 'withdrawn', registries: LOCAL_REGISTRY, note: 'the issuer withdrew it' },
+  { label: 'Built wrong', file: 'malformed', registries: LOCAL_REGISTRY, note: 'genuine, but missing a field its standard requires' },
   { label: 'Changed', file: 'tampered', registries: LOCAL_REGISTRY, note: 'altered after issuing' },
   { label: 'No signature', file: 'unsigned', registries: LOCAL_REGISTRY, note: 'nothing to check' },
 ];

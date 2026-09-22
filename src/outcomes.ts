@@ -113,6 +113,62 @@ const unreachableNames = (step: VerificationStep | undefined): string[] =>
     .filter((n): n is string => typeof n === 'string' && n.length > 0);
 
 // ---------------------------------------------------------------------------
+// Whether the credential was built the way its own standard requires
+// ---------------------------------------------------------------------------
+
+/**
+ * Four answers, and the difference between the last two matters.
+ *
+ * - `invalid`   — it was built wrong. A finding, and the issuer's to fix.
+ * - `valid`     — it matches the standard it claims.
+ * - `no_schema` — nothing declared a standard to check it against. Nothing
+ *                 failed and there was nothing to try.
+ * - `unavailable` — there was a standard and we could not load it.
+ *
+ * `missingOnly` separates "the issuer left fields out" from "a field is the
+ * wrong shape", because only the first can be described to a person in words
+ * they will recognise.
+ */
+export type SchemaFinding =
+  | { state: 'valid' }
+  | { state: 'invalid'; missingOnly: boolean }
+  | { state: 'no_schema' }
+  | { state: 'unavailable' };
+
+/**
+ * verifier-core runs this on every verification and files it under
+ * `additionalInformation`, not `log` — so it never reaches `verified`, and a
+ * credential can be reported as verified while failing its own schema.
+ * Reading only the log throws this away silently.
+ */
+export const schemaFinding = (r: VerificationResponse): SchemaFinding => {
+  const entry = (r.additionalInformation ?? []).find((e) => e.id === STEP.schema);
+  if (!entry) return { state: 'no_schema' };
+
+  // Typed as a list, returned as a string when there was nothing to validate
+  // against. See AdditionalInformationEntry.
+  if (typeof entry.results === 'string') {
+    return entry.results === 'NO_SCHEMA' ? { state: 'no_schema' } : { state: 'unavailable' };
+  }
+  if (!Array.isArray(entry.results) || entry.results.length === 0) return { state: 'no_schema' };
+
+  const failures = entry.results.filter((s) => s?.result?.valid === false);
+  if (failures.length === 0) {
+    // A schema that reported neither pass nor fail established nothing, and
+    // must not be counted as a pass.
+    return entry.results.some((s) => s?.result?.valid === true)
+      ? { state: 'valid' }
+      : { state: 'unavailable' };
+  }
+
+  const errors = failures.flatMap((f) => f.result.errors ?? []);
+  return {
+    state: 'invalid',
+    missingOnly: errors.length > 0 && errors.every((e) => e.keyword === 'required'),
+  };
+};
+
+// ---------------------------------------------------------------------------
 // The issuer: a name, plus where the name came from
 // ---------------------------------------------------------------------------
 
@@ -372,6 +428,31 @@ export const summarise = (r: VerificationResponse): Outcome => {
     };
   }
 
+  // A credential can be genuine, current, and not withdrawn, and still have
+  // been built wrong. That is a finding rather than an unknown, so it leads
+  // over everything below — but it is a warning and not an error: nothing
+  // here says the credential is fake, and a red verdict would say exactly
+  // that. It sits below `expired` because expiry is the one the holder can
+  // actually do something about.
+  const schema = schemaFinding(r);
+  if (schema.state === 'invalid') {
+    return {
+      severity: 'warning',
+      code: 'malformed',
+      headline: schema.missingOnly
+        ? 'This credential is missing information it should have'
+        : "This credential wasn't built the way it should have been",
+      detail: schema.missingOnly
+        ? "It's genuine and hasn't been withdrawn, but it leaves out details that credentials of this kind are required to carry."
+        : "It's genuine and hasn't been withdrawn, but parts of it don't match the standard for this kind of credential.",
+      // Nate Otto, 22 September: "None of these are errors that the user who
+      // holds the credential could resolve themselves." Naming a task the
+      // reader cannot perform is worse than naming none, so the action says
+      // whose it is and releases them from it.
+      action: `${issuer.name} needs to fix how this was issued. There's nothing for you to do.`,
+    };
+  }
+
   // Everything below is "we couldn't check something", in order of how much
   // it costs the person to not know.
   const revocationError = revocation?.error?.name;
@@ -528,6 +609,29 @@ export const listChecks = (r: VerificationResponse): Check[] => {
       : passed(expiration)
         ? 'in date'
         : 'not checked',
+  });
+
+  // Last, because it is the least about the credential's standing and the
+  // most about the issuer's setup. `no_schema` and `unavailable` are shown
+  // rather than hidden for the same reason the missing withdrawal list is:
+  // an issuer debugging their own badge cannot otherwise tell "nothing to
+  // check against" apart from "checked and clean".
+  const schema = schemaFinding(r);
+  checks.push({
+    id: STEP.schema,
+    label: 'How it was built',
+    severity:
+      schema.state === 'valid' ? 'success' : schema.state === 'invalid' ? 'warning' : 'unchecked',
+    value:
+      schema.state === 'valid'
+        ? 'as the standard expects'
+        : schema.state === 'invalid'
+          ? schema.missingOnly
+            ? 'missing details the standard requires'
+            : "doesn't match the standard for this kind of credential"
+          : schema.state === 'no_schema'
+            ? 'no standard was declared to check it against'
+            : "couldn't load the standard to check it against",
   });
 
   return checks;

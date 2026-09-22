@@ -59,15 +59,29 @@ export interface VerificationStep {
   uncheckedRegistries?: UncheckedRegistry[];
 }
 
+/** One Ajv complaint. `keyword` is how we tell "left out" from "wrong". */
+export interface SchemaError {
+  keyword?: string;
+  message?: string;
+  instancePath?: string;
+}
+
 export interface SchemaCheck {
   schema: string;
-  result: { valid: boolean; errors?: object[] };
+  result: { valid: boolean; errors?: SchemaError[] };
   source: string;
 }
 
+/**
+ * Note `results`: the declarations say it is always a list of checks, and the
+ * runtime returns a bare string when there was no schema to validate against
+ * (`NO_SCHEMA`) or the named one could not be loaded. Same declarations-vs-
+ * runtime split as `matchingIssuers`, and the same resolution — describe the
+ * runtime, because that is what arrives.
+ */
 export interface AdditionalInformationEntry {
   id: string;
-  results: SchemaCheck[];
+  results: SchemaCheck[] | string;
 }
 
 /**
@@ -90,4 +104,8 @@ export const STEP = {
   revocation: 'revocation_status',
   expiration: 'expiration',
   registeredIssuer: 'registered_issuer',
+  // Not a step in `log`. verifier-core files the schema result under
+  // `additionalInformation` with this id, so it never affects `verified` and
+  // is invisible to anything that reads the log alone.
+  schema: 'schema_check',
 } as const;
