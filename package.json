@@ -20,7 +20,7 @@
     "build": "vite build && tsc -b",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "oxlint",
+    "lint": "oxlint --deny-warnings",
     "test:browser": "playwright test",
     "fixtures": "node scripts/make-fixtures.js"
   },
