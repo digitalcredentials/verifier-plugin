@@ -18,7 +18,12 @@ import type { VerificationResponse, VerificationStep } from '../src/types.js';
  */
 
 type Sig = 'passed' | 'failed' | 'missing';
-type Rev = 'passed' | 'failed' | 'errored' | 'none';
+// `unreadable` is the case the first four missed: the credential says it can
+// be withdrawn, and verifier-core left no revocation step in the log at all,
+// which is what it does with a `credentialStatus` type it does not
+// recognise. `none` cannot express it — that removes the credentialStatus
+// and the step together, so the pair always agreed.
+type Rev = 'passed' | 'failed' | 'errored' | 'none' | 'unreadable';
 type Exp = 'passed' | 'failed' | 'missing';
 // `matched+unreachable` is the combination the first three missed: one
 // registry recognised the issuer while another could not be reached. Both
@@ -28,7 +33,7 @@ type Iss = 'matched' | 'unlisted' | 'unreachable' | 'matched+unreachable';
 type Sch = 'valid' | 'invalid' | 'none' | 'unavailable';
 
 const SIGNATURES: Sig[] = ['passed', 'failed', 'missing'];
-const REVOCATIONS: Rev[] = ['passed', 'failed', 'errored', 'none'];
+const REVOCATIONS: Rev[] = ['passed', 'failed', 'errored', 'none', 'unreadable'];
 const EXPIRATIONS: Exp[] = ['passed', 'failed', 'missing'];
 const ISSUERS: Iss[] = ['matched', 'unlisted', 'unreachable', 'matched+unreachable'];
 const SCHEMAS: Sch[] = ['valid', 'invalid', 'none', 'unavailable'];
