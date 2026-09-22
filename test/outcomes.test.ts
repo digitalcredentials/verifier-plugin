@@ -292,3 +292,133 @@ describe('summariseCredential', () => {
     expect(summary.title).not.toBe('Sam Salmon');
   });
 });
+
+describe('the issuer name carries where it came from', () => {
+  it('shows no marker when a registry recognised them', async () => {
+    const { issuerMarker } = await import('../src/outcomes.js');
+    expect(issuerMarker(issuerIdentity(ok()).source)).toBeUndefined();
+  });
+
+  it('marks a name that only the credential vouches for', async () => {
+    const { issuerMarker } = await import('../src/outcomes.js');
+    const r = ok();
+    r.log![3] = { id: 'registered_issuer', valid: false, matchingIssuers: [], uncheckedRegistries: [] };
+    expect(issuerMarker(issuerIdentity(r).source)).toBe('unconfirmed');
+  });
+
+  it('marks a name we could not check, differently from one we could', async () => {
+    const { issuerMarker } = await import('../src/outcomes.js');
+    const r = ok();
+    r.log![3] = {
+      id: 'registered_issuer',
+      valid: false,
+      matchingIssuers: [],
+      uncheckedRegistries: [{ name: 'DCC Registry' }],
+    };
+    expect(issuerMarker(issuerIdentity(r).source)).toBe('not checked');
+  });
+
+  it.each(['no_proof', 'invalid_signature'])(
+    'marks no single field when verification stopped at %s',
+    async (name) => {
+      const { issuerMarker, contentCaveat, verdictLeads } = await import('../src/outcomes.js');
+      const r: VerificationResponse = { credential, errors: [{ name, message: 'x' }] };
+      const identity = issuerIdentity(r);
+      expect(identity.source).toBe('unverifiable');
+
+      // We know something is wrong and not where, so marking the issuer alone
+      // would imply the other fields are fine. One caveat covers the lot.
+      expect(issuerMarker(identity.source)).toBeUndefined();
+      expect(contentCaveat(r)).toContain("can't confirm");
+      expect(verdictLeads(r)).toBe(true);
+    },
+  );
+});
+
+describe('when the finding comes before the credential', () => {
+  it('leads with the credential whenever verification ran', async () => {
+    const { verdictLeads, contentCaveat } = await import('../src/outcomes.js');
+    // Even an error. A withdrawn credential is still a real credential, and
+    // its contents were confirmed unaltered.
+    const r = ok();
+    r.log![2] = { id: 'revocation_status', valid: false };
+    expect(summarise(r).severity).toBe('error');
+    expect(verdictLeads(r)).toBe(false);
+    expect(contentCaveat(r)).toBeUndefined();
+  });
+
+  it('leads with the finding only when verification stopped', async () => {
+    const { verdictLeads } = await import('../src/outcomes.js');
+    expect(verdictLeads({ credential, errors: [{ name: 'invalid_signature', message: 'x' }] })).toBe(true);
+    expect(verdictLeads(ok())).toBe(false);
+  });
+});
+
+describe('an expired credential names the date', () => {
+  it('says when it expired', () => {
+    const r = ok();
+    r.credential = { ...credential, validUntil: '2026-01-09T10:00:00Z' };
+    r.log![1] = { id: 'expiration', valid: false };
+    expect(summarise(r).headline).toBe('Expired on 9 January 2026');
+  });
+
+  it('falls back when there is no readable date', () => {
+    const r = ok();
+    r.log![1] = { id: 'expiration', valid: false };
+    expect(summarise(r).headline).toBe('This has passed its end date');
+  });
+});
+
+describe('findings from the second review', () => {
+  it('does not claim "Verified" when the signature check is absent from the log', () => {
+    // A log with no signature step establishes nothing. listChecks renders it
+    // as "not checked", so the headline must not say the opposite.
+    const r = ok();
+    r.log = r.log!.filter((step) => step.id !== 'valid_signature');
+    const out = summarise(r);
+    expect(out.severity).not.toBe('success');
+    expect(out.code).toBe('signature_unchecked');
+
+    const row = listChecks(r).find((c) => c.id === 'valid_signature');
+    expect(row!.severity).toBe('unchecked');
+  });
+
+  it('gives a vocabulary failure its own advice, not "try again"', () => {
+    const r: VerificationResponse = {
+      credential,
+      errors: [{ name: 'jsonld.ValidationError', message: 'x' }],
+    };
+    const out = summarise(r);
+    expect(out.severity).toBe('error');
+    expect(out.action).not.toContain('Try again');
+    expect(out.action).toContain('replacement');
+  });
+
+  it('never leaks a library error name as one of our codes', () => {
+    const r: VerificationResponse = {
+      credential,
+      errors: [{ name: 'SomeUpstreamError', message: 'x' }],
+    };
+    const out = summarise(r);
+    expect(out.code).toBe('unknown_error');
+    expect(out.code).not.toContain('Upstream');
+  });
+
+  it.each(['America/New_York', 'Pacific/Auckland', 'UTC'])(
+    'reports the same expiry date in %s',
+    (timeZone) => {
+      // A credential's dates belong to the credential, not to where its
+      // holder is standing. A date-only value is the case that breaks.
+      const original = process.env.TZ;
+      process.env.TZ = timeZone;
+      try {
+        const r = ok();
+        r.credential = { ...credential, validUntil: '2026-01-09' };
+        r.log![1] = { id: 'expiration', valid: false };
+        expect(summarise(r).headline).toBe('Expired on 9 January 2026');
+      } finally {
+        process.env.TZ = original;
+      }
+    },
+  );
+});

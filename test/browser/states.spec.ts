@@ -125,7 +125,7 @@ test.describe('lifecycle, from review', () => {
     await page.waitForTimeout(3000);
     const c = await card(page);
     expect(c.severity).toBe('warning');
-    expect(c.headline).toContain('end date');
+    expect(c.headline).toContain('Expired');
   });
 
   test('a credential set while detached is still verified on reattach', async ({ page }) => {
@@ -180,6 +180,78 @@ test.describe('lifecycle, from review', () => {
     });
     expect(severity, 'setting registries did not re-verify').not.toBeNull();
     expect(severity).toBe('unchecked');
+  });
+
+  test('setting registries and credential together checks once, not twice', async ({ page }) => {
+    // A host sets several properties in a row. Verifying on each one would
+    // check the old credential against the new registries and discard the
+    // answer, doubling every registry and status-list fetch.
+    const starts = await page.evaluate(async () => {
+      const el = document.getElementById('vc') as HTMLElement & {
+        credential?: unknown;
+        registries?: unknown;
+      };
+      let started = 0;
+      const count = () => started++;
+      el.addEventListener('verification-started', count);
+      const credential = await (await fetch('./fixtures/expired.json')).json();
+      el.registries = [];
+      el.credential = credential;
+      await new Promise((r) => setTimeout(r, 4000));
+      el.removeEventListener('verification-started', count);
+      return started;
+    });
+    expect(starts).toBe(1);
+  });
+
+  test('a credential that stopped early still says it was checked', async ({ page }) => {
+    await pick(page, 'No signature');
+    const foot = await page.evaluate(
+      () => document.getElementById('vc')!.shadowRoot!.querySelector('.foot')?.textContent?.trim(),
+    );
+    expect(foot).toContain('Checked');
+    // ...but there is no per-check list to open.
+    const toggle = await page.evaluate(
+      () => !!document.getElementById('vc')!.shadowRoot!.querySelector('#toggle'),
+    );
+    expect(toggle).toBe(false);
+  });
+
+  test('does not say "checked just now" while it is still checking', async ({ page }) => {
+    // The footer reports when we checked, so it has no business appearing
+    // before a check has finished.
+    const footWhileChecking = await page.evaluate(async () => {
+      const el = document.getElementById('vc') as HTMLElement & { credential?: unknown };
+      const credential = await (await fetch('./fixtures/verified.json')).json();
+      el.credential = credential;
+      await new Promise((r) => setTimeout(r, 0));
+      const root = el.shadowRoot!;
+      return {
+        headline: root.querySelector('.headline')?.textContent?.trim() ?? '',
+        foot: root.querySelector('.foot')?.textContent?.trim() ?? '',
+      };
+    });
+    expect(footWhileChecking.headline).toContain('Checking');
+    expect(footWhileChecking.foot).toBe('');
+  });
+
+  test('changing the registries clears the previous details, not just the verdict', async ({ page }) => {
+    await pick(page, 'Verified');
+    await page.locator('#vc').locator('#toggle').click();
+    const before = await page.evaluate(
+      () => document.getElementById('vc')!.shadowRoot!.querySelectorAll('.check').length,
+    );
+    expect(before).toBeGreaterThan(0);
+
+    // Mid-check, the old run's rows must be gone rather than sitting under a
+    // verdict that no longer describes them.
+    const during = await page.evaluate(async () => {
+      const el = document.getElementById('vc') as HTMLElement & { registries?: unknown };
+      el.registries = [];
+      await new Promise((r) => setTimeout(r, 0));
+      return el.shadowRoot!.querySelectorAll('.check').length;
+    });
+    expect(during).toBe(0);
   });
 
   test('the verdict is written into a live region that was already on the page', async ({ page }) => {

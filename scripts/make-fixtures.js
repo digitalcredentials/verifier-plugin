@@ -152,11 +152,17 @@ const main = async () => {
   );
 
   // --- tampered: signed honestly, then altered -----------------------------
+  // A plausible name, deliberately. The realistic attack is someone putting
+  // their own name on another person's certificate, and the resulting card
+  // looks entirely ordinary — which is the point. An obviously odd value
+  // like "Someone Else" reads as an explanation and invites the wrong one:
+  // that the credential belongs to somebody else, rather than that it was
+  // altered and we cannot say where.
   const tampered = await sign(
     baseCredential(issuerDid, { uuid: '8e5d2a63-1c97-4f05-b3d8-7a49e6c2f018' }),
   );
-  tampered.credentialSubject.name = 'Someone Else';
-  await write('tampered', tampered, 'signed, then the name was changed');
+  tampered.credentialSubject.name = 'Robin Whitaker';
+  await write('tampered', tampered, 'signed, then the recipient name was changed');
 
   // --- no signature at all -------------------------------------------------
   await write('unsigned', baseCredential(issuerDid, { uuid: 'b17f3e58-6a24-4c9d-85b1-0e7c2f9a4d36' }),

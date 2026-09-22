@@ -36,8 +36,19 @@ export interface Check {
   value: string;
 }
 
-/** Where an issuer's name came from. requirements.md §5. */
-export type IssuerNameSource = 'registry' | 'credential' | 'none' | 'unknown';
+/**
+ * Where an issuer's name came from. requirements.md §5.
+ *
+ * `unverifiable` is the case the requirements don't cover: verification
+ * stopped before anything could be established, so the name is just text in a
+ * file nobody has vouched for.
+ */
+export type IssuerNameSource =
+  | 'registry'
+  | 'credential'
+  | 'none'
+  | 'unknown'
+  | 'unverifiable';
 
 export interface IssuerIdentity {
   name: string;
@@ -112,6 +123,7 @@ const unreachableNames = (step: VerificationStep | undefined): string[] =>
  */
 export const issuerIdentity = (r: VerificationResponse): IssuerIdentity => {
   const step = stepsById(r).get(STEP.registeredIssuer);
+  const nothingEstablished = stoppedEarly(r);
   const registries = registryNames(step);
   const unreachable = unreachableNames(step);
 
@@ -137,16 +149,90 @@ export const issuerIdentity = (r: VerificationResponse): IssuerIdentity => {
     };
   }
   // A registry we could not reach means we do not know, rather than "no".
-  const source: IssuerNameSource = unreachable.length > 0 ? 'unknown' : 'credential';
+  const source: IssuerNameSource = nothingEstablished
+    ? 'unverifiable'
+    : unreachable.length > 0
+      ? 'unknown'
+      : 'credential';
   if (claimedName) return { name: claimedName, source, registries, unreachable, id };
-  return { name: id ?? 'Unknown issuer', source: 'none', registries, unreachable, id };
+  return {
+    name: id ?? 'Unknown issuer',
+    source: nothingEstablished ? 'unverifiable' : 'none',
+    registries,
+    unreachable,
+    id,
+  };
 };
+
+/**
+ * The short marker shown beside the issuer's name in the main view.
+ *
+ * requirements.md §5 asks for this, and for it to repeat what the verdict
+ * says, because people scan and read the first thing they meet. Nothing is
+ * shown on the happy path: a recognised issuer needs no caveat, and putting
+ * registry vocabulary there would be machinery talk on the screen most people
+ * see most often.
+ */
+export const issuerMarker = (source: IssuerNameSource): string | undefined => {
+  switch (source) {
+    case 'registry':
+      return undefined;
+    case 'unknown':
+      return 'not checked';
+    case 'unverifiable':
+      // No per-field marker here, deliberately. When the signature is broken
+      // or missing we know something is wrong and not where, so marking the
+      // issuer while the title, recipient and date stand unmarked would imply
+      // the rest is fine. The whole card carries one caveat instead — see
+      // contentCaveat.
+      return undefined;
+    default:
+      return 'unconfirmed';
+  }
+};
+
+/**
+ * Whether the finding should come before the credential.
+ *
+ * requirements.md §4 says the credential leads, and that is right when the
+ * credential is the point. When verification stopped, the credential is
+ * exactly what is in question, so the finding is the point. A deliberate
+ * exception, and only for this case.
+ */
+export const verdictLeads = (r: VerificationResponse): boolean => stoppedEarly(r);
+
+/**
+ * One caveat for the whole of the displayed content.
+ *
+ * Verification stopped, so nothing shown was confirmed — and we cannot say
+ * which field is wrong, only that we could not stand behind any of them. A
+ * single line covering everything matches what we actually know; a marker per
+ * field would claim knowledge we do not have.
+ */
+export const contentCaveat = (r: VerificationResponse): string | undefined =>
+  stoppedEarly(r) ? "These details are what the file says. We can't confirm any of them." : undefined;
 
 // ---------------------------------------------------------------------------
 // Tier A — it stopped
 // ---------------------------------------------------------------------------
 
+/**
+ * The library returns json-ld processing failures raw and unclassified, under
+ * whatever name the underlying library used. They are a real case with real
+ * advice — the credential's vocabulary cannot be read, and retrying will not
+ * change that — so they get their own outcome rather than falling through to
+ * "something went wrong, try again".
+ */
+const isJsonLdError = (name: string): boolean => name.toLowerCase().includes('jsonld');
+
 const FATAL: Record<string, Omit<Outcome, 'code'>> = {
+  unreadable_vocabulary: {
+    severity: 'error',
+    headline: "We can't read this credential",
+    detail:
+      "It uses vocabulary we couldn't process, so none of it could be checked. This is usually a problem with how it was built.",
+    action: 'Ask the issuer for a replacement.',
+  },
   invalid_jsonld: {
     severity: 'error',
     headline: "This file isn't a credential",
@@ -211,6 +297,23 @@ const REVOCATION_UNAVAILABLE = new Set([
   'status_list_error',
 ]);
 
+const expiryDate = (r: VerificationResponse): string | undefined => {
+  const raw = r.credential?.['validUntil'] ?? r.credential?.['expirationDate'];
+  if (typeof raw !== 'string') return undefined;
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return undefined;
+  // Pinned to UTC. A credential's dates are properties of the credential, not
+  // of where its holder happens to be standing, and a date-only value such as
+  // "2026-01-09" parses as midnight UTC — which in New York would otherwise
+  // render as the 8th.
+  return date.toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+};
+
 // ---------------------------------------------------------------------------
 // The one line the main view shows
 // ---------------------------------------------------------------------------
@@ -224,11 +327,15 @@ const REVOCATION_UNAVAILABLE = new Set([
  */
 export const summarise = (r: VerificationResponse): Outcome => {
   if (stoppedEarly(r)) {
-    const name = r.errors?.[0]?.name ?? 'unknown_error';
-    // Object.hasOwn, so an error named `toString` or `constructor` falls back
-    // rather than inheriting something from Object.prototype.
-    const known = Object.hasOwn(FATAL, name) ? FATAL[name]! : FATAL['unknown_error']!;
-    return { code: name, ...known };
+    const raw = r.errors?.[0]?.name ?? 'unknown_error';
+    // Our codes are ours, and stable. An unrecognised name from the library
+    // must not become one by leaking through.
+    const code = Object.hasOwn(FATAL, raw)
+      ? raw
+      : isJsonLdError(raw)
+        ? 'unreadable_vocabulary'
+        : 'unknown_error';
+    return { code, ...FATAL[code]! };
   }
 
   const steps = stepsById(r);
@@ -252,10 +359,14 @@ export const summarise = (r: VerificationResponse): Outcome => {
   }
 
   if (failed(expiration)) {
+    // Name the date. How stale it is changes what someone does about it, and
+    // "eight months ago" is vaguer than a date when a qualification is at
+    // stake. §4's relative times are about when *we* checked, not this.
+    const on = expiryDate(r);
     return {
       severity: 'warning',
       code: 'expired',
-      headline: 'This has passed its end date',
+      headline: on ? `Expired on ${on}` : 'This has passed its end date',
       detail: "It's genuine and hasn't been withdrawn, but it has expired.",
       action: `Ask ${issuer.name} whether it can be renewed.`,
     };
@@ -301,6 +412,20 @@ export const summarise = (r: VerificationResponse): Outcome => {
       code: 'issuer_unconfirmed',
       headline: "Genuine, but we can't confirm who issued it",
       detail: `This credential hasn't been changed since it was issued, and the issuer hasn't withdrawn it. ${says}`,
+    };
+  }
+
+  // Everything left is a pass — but only if the signature actually reported
+  // one. A log with no signature step establishes nothing, and listChecks
+  // shows it as "not checked"; the headline must not say otherwise.
+  if (!passed(signature)) {
+    return {
+      severity: 'unchecked',
+      code: 'signature_unchecked',
+      headline: "We couldn't finish checking this",
+      detail:
+        "We couldn't confirm whether this has been changed since it was issued. That's a problem at our end, not with your credential.",
+      action: 'Try again in a moment.',
     };
   }
 
