@@ -5,6 +5,12 @@ on:
   push:
     branches: [main]
 
+# This workflow only reads the repo and runs tests. Nothing here needs to
+# write, and `npm ci` runs install scripts from every dependency, so the
+# job should not be holding a token that can push.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
