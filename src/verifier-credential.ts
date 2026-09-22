@@ -52,6 +52,19 @@ const SEVERITY_LABEL: Record<string, string> = {
   unchecked: "Couldn't check",
 };
 
+/**
+ * The same severities, said aloud on a detail row.
+ *
+ * "Verified" is right for the card's verdict and wrong for one line of a
+ * breakdown, where a screen reader would otherwise read "Verified: none".
+ */
+const CHECK_LABEL: Record<string, string> = {
+  success: 'Passed',
+  warning: 'Warning',
+  error: 'Problem',
+  unchecked: "Couldn't check",
+};
+
 const styles = `
   :host { display: block; container-type: inline-size; }
   * { box-sizing: border-box; }
@@ -406,7 +419,7 @@ const checkHtml = (c: Check): string => `
     <span class="k">${esc(c.label)}</span>
     <span class="v">
       <span class="mark s-${c.severity}" aria-hidden="true">${GLYPH[c.severity]}</span>
-      <span><span class="sr-only">${SEVERITY_LABEL[c.severity]}: </span>${esc(c.value)}</span>
+      <span><span class="sr-only">${CHECK_LABEL[c.severity]}: </span>${esc(c.value)}</span>
     </span>
   </div>`;
 

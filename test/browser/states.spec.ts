@@ -114,7 +114,7 @@ test('details open and list the checks that ran', async ({ page }) => {
     ),
   );
   expect(rows.length).toBeGreaterThan(0);
-  expect(rows.join(' ')).toContain('Withdrawn by issuer');
+  expect(rows.join(' ')).toContain('Withdrawal');
 });
 
 test.describe('lifecycle, from review', () => {
@@ -252,6 +252,18 @@ test.describe('lifecycle, from review', () => {
       return el.shadowRoot!.querySelectorAll('.check').length;
     });
     expect(during).toBe(0);
+  });
+
+  test('a detail row is not read out as "Verified: none"', async ({ page }) => {
+    await pick(page, 'Verified');
+    await page.locator('#vc').locator('#toggle').click();
+    const spoken = await page.evaluate(() =>
+      [...document.getElementById('vc')!.shadowRoot!.querySelectorAll('.check')]
+        .map((r) => r.textContent!.replace(/\s+/g, ' ').trim())
+        .join(' | '),
+    );
+    expect(spoken).toContain('Passed:');
+    expect(spoken).not.toContain('Verified:');
   });
 
   test('the verdict is written into a live region that was already on the page', async ({ page }) => {
