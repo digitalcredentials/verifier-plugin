@@ -346,6 +346,31 @@ const FATAL: Record<string, Omit<Outcome, 'code'>> = {
   },
 };
 
+/**
+ * What a finding may add about the rest of the credential.
+ *
+ * A verdict that leads with one problem usually wants to say the other
+ * checks were fine — it is the difference between "this expired" and "this
+ * is suspect". But that reassurance has been wrong three times now, always
+ * the same way: stated as fixed text, so it appeared above a breakdown
+ * reporting that the very thing it asserted had never been checked.
+ *
+ * So it is assembled from what reported, and returns nothing at all rather
+ * than anything unearned. `test/consistency.test.ts` asserts the claim
+ * against the rows, in prose, because severities cannot see this: both
+ * sides read "unchecked" and agree perfectly while the sentence lies.
+ */
+const reassurance = (
+  r: VerificationResponse,
+  steps: Map<string, VerificationStep>,
+): string => {
+  if (!passed(steps.get(STEP.signature))) return '';
+  const notWithdrawn = !hasStatusList(r) || passed(steps.get(STEP.revocation));
+  return notWithdrawn
+    ? " Nothing has changed since it was issued, and the issuer hasn't withdrawn it."
+    : ' Nothing has changed since it was issued.';
+};
+
 const expiryDate = (r: VerificationResponse): string | undefined => {
   const raw = r.credential?.['validUntil'] ?? r.credential?.['expirationDate'];
   if (typeof raw !== 'string') return undefined;
@@ -416,7 +441,7 @@ export const summarise = (r: VerificationResponse): Outcome => {
       severity: 'warning',
       code: 'expired',
       headline: on ? `Expired on ${on}` : 'This has passed its end date',
-      detail: "It's genuine and hasn't been withdrawn, but it has expired.",
+      detail: `Its dates have run out.${reassurance(r, steps)}`,
       action: `Ask ${issuer.name} whether it can be renewed.`,
     };
   }
@@ -435,12 +460,6 @@ export const summarise = (r: VerificationResponse): Outcome => {
     // withdrawal list never loaded, is precisely the contradiction this file
     // exists to prevent — and since status lists do not load in a browser
     // today, that second case is the common path and not an edge.
-    const notWithdrawn = !hasStatusList(r) || passed(revocation);
-    const reassurance = !passed(signature)
-      ? ''
-      : notWithdrawn
-        ? " Nothing has changed since it was issued, and the issuer hasn't withdrawn it."
-        : ' Nothing has changed since it was issued.';
     return {
       severity: 'warning',
       code: 'malformed',
@@ -450,7 +469,8 @@ export const summarise = (r: VerificationResponse): Outcome => {
       detail:
         (schema.missingOnly
           ? 'It leaves out details that credentials of this kind are required to carry.'
-          : "Parts of it don't match the standard for this kind of credential.") + reassurance,
+          : "Parts of it don't match the standard for this kind of credential.") +
+        reassurance(r, steps),
       // Nate Otto, 22 September: "None of these are errors that the user who
       // holds the credential could resolve themselves." Naming a task the
       // reader cannot perform is worse than naming none, so the action says
@@ -502,7 +522,13 @@ export const summarise = (r: VerificationResponse): Outcome => {
     };
   }
 
-  if (!passed(steps.get(STEP.registeredIssuer))) {
+  // `passed(signature)` is a condition of this outcome, not an afterthought:
+  // its first word is "Genuine", and the sentence under it says nothing has
+  // changed since issue. Neither is ours to say until the signature check has
+  // reported. Without it we fall through to `signature_unchecked` below,
+  // which is the more serious unknown and should lead anyway — §5 is explicit
+  // that an unlisted issuer is common and means nothing is wrong.
+  if (!passed(steps.get(STEP.registeredIssuer)) && passed(signature)) {
     // requirements.md §5: one sentence, not two verdicts, and ⓘ rather than ⚠.
     // Nothing is wrong here. Something is unknown.
     const says =

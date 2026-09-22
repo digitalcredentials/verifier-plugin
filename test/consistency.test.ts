@@ -180,6 +180,29 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
       expect(worst, `${where}: a warning row under an unchecked verdict`).not.toContain('warning');
     }
 
+    // A verdict must not claim in prose what the breakdown says was never
+    // checked. This is the one contradiction severities cannot see: both
+    // sides read "unchecked" and agree perfectly, while the sentence above
+    // them asserts the credential is genuine. Three separate bugs have now
+    // been this same sentence, so the rule is written once, for the claim,
+    // rather than a third time for the instance.
+    const claims = `${out.headline} ${out.detail}`.toLowerCase();
+
+    if (/\bgenuine\b|hasn't been changed|has not been changed|nothing has changed/.test(claims)) {
+      expect(
+        row('valid_signature')?.severity,
+        `${where}: claims the credential is unchanged, but the signature row says "${row('valid_signature')?.value}"`,
+      ).toBe('success');
+    }
+
+    if (/hasn't been withdrawn|hasn't withdrawn it|not been withdrawn/.test(claims)) {
+      const rev = row('revocation_status')!;
+      expect(
+        rev.severity === 'success' || !hasStatusList(r),
+        `${where}: claims it was not withdrawn, but the row says "${rev.value}"`,
+      ).toBe(true);
+    }
+
     // Each verdict must be borne out by the row it is about.
     const expectations: Record<string, [string, string] | undefined> = {
       verified: ['valid_signature', 'success'],
