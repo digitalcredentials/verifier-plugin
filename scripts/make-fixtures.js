@@ -127,6 +127,36 @@ const main = async () => {
     'signed and valid, but past its end date',
   );
 
+  // --- malformed: correctly signed, but not built to its own standard ------
+  // The issuer left out `achievement.id`, which the Open Badges schema makes
+  // required — the same omission in Nate Otto's 22 September screenshot.
+  // Nothing here is fraudulent: the signature is real, the dates are fine,
+  // and verifier-core still reports the credential as verified, because the
+  // schema result is filed under `additionalInformation` and never reaches
+  // `verified`. It is the issuer's mistake and only the issuer's to fix.
+  await write(
+    'malformed',
+    await sign(
+      baseCredential(issuerDid, {
+        uuid: '8e5d2b71-0c46-4a93-b7e2-4f1a6c9d3058',
+        credential: {
+          credentialSubject: {
+            type: ['AchievementSubject'],
+            name: 'Sam Salmon',
+            achievement: {
+              type: ['Achievement'],
+              achievementType: 'Certificate',
+              name: 'Requirements Analysis Certificate',
+              description: 'Awarded for completing the requirements analysis programme.',
+              criteria: { narrative: 'Completed all coursework and the final assessment.' },
+            },
+          },
+        },
+      }),
+    ),
+    'signed and in date, but missing a field its own standard requires',
+  );
+
   // --- withdrawn: listed as revoked in the status list ---------------------
   await write(
     'withdrawn',

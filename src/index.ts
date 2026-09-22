@@ -9,10 +9,12 @@ export {
   contentCaveat,
   stoppedEarly,
   hasStatusList,
+  schemaFinding,
   type Outcome,
   type Check,
   type IssuerIdentity,
   type IssuerNameSource,
+  type SchemaFinding,
 } from './outcomes.js';
 export { summariseCredential, formatDate, type CredentialSummary } from './credential.js';
 export type { Severity, VerificationResponse, VerificationStep } from './types.js';

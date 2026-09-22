@@ -68,6 +68,23 @@ test('an altered credential is an error and asks for a fresh copy', async ({ pag
   expect(c.action).toContain('fresh copy');
 });
 
+/**
+ * The one state verifier-core itself calls a pass. Its schema result never
+ * reaches `verified`, so this whole case is invisible to anything reading the
+ * log alone — and it only shows up here because the schema was really
+ * fetched and really validated against.
+ */
+test('a credential built wrong is a warning, and asks nothing of the holder', async ({ page }) => {
+  const c = await pick(page, 'Built wrong');
+  expect(c.severity).toBe('warning');
+  expect(c.severity).not.toBe('error');
+  expect(c.headline).toContain('missing information');
+  // It is the issuer's to fix, and the card says so rather than inventing a
+  // task for someone who cannot perform it.
+  expect(c.action).toContain('Springfield College');
+  expect(c.action).toContain('nothing for you to do');
+});
+
 test('a credential with no signature says so plainly', async ({ page }) => {
   const c = await pick(page, 'No signature');
   expect(c.severity).toBe('error');
