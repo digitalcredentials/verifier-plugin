@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { summarise, listChecks, issuerIdentity, schemaFinding } from '../src/outcomes.js';
+import {
+  summarise,
+  listChecks,
+  issuerIdentity,
+  issuerMarker,
+  schemaFinding,
+} from '../src/outcomes.js';
 import type { VerificationResponse } from '../src/types.js';
 
 /** A credential that can be withdrawn, so the revocation check applies. */
@@ -687,5 +693,84 @@ describe('an unreachable registry when another one answered', () => {
     const row = listChecks(matchedAndUnreachable()).find((c) => c.id === 'registered_issuer');
     expect(row!.severity).toBe('success');
     expect(row!.value).toContain('found in');
+  });
+});
+
+describe('a withdrawal method we do not recognise', () => {
+  // Found in the second review. verifier-core leaves no revocation step at
+  // all for a `credentialStatus` type it does not know, which is not the
+  // same as the issuer providing no way to withdraw. The verdict fell
+  // through to a green "Verified" whose detail said the issuer had not
+  // withdrawn it, above a row saying we could not check.
+  const unrecognised = (): VerificationResponse => {
+    const r = ok();
+    r.credential = {
+      issuer: { id: 'did:key:z6Mkn', name: 'Springfield College' },
+      credentialStatus: { type: 'SomeFutureStatusMethod' },
+    };
+    r.log = r.log!.filter((s) => s.id !== 'revocation_status');
+    return r;
+  };
+
+  it('does not claim the issuer has not withdrawn it', () => {
+    const out = summarise(unrecognised());
+    expect(out.code).toBe('withdrawal_unknown');
+    expect(out.severity).toBe('unchecked');
+    expect(out.detail).not.toContain("hasn't withdrawn");
+  });
+
+  it('says why, and does not blame a list that never loaded', () => {
+    // There was no fetch to fail. Saying the list "didn't load" invents a
+    // cause, and points an issuer at the wrong thing.
+    const out = summarise(unrecognised());
+    expect(out.detail).toContain('not by a method we recognise');
+    expect(out.detail).not.toContain("didn't load");
+  });
+
+  it('reads the same way in the breakdown', () => {
+    const row = listChecks(unrecognised()).find((c) => c.id === 'revocation_status');
+    expect(row).toMatchObject({
+      severity: 'unchecked',
+      value: "couldn't check — not a withdrawal method we recognise",
+    });
+  });
+
+  it('is still told apart from an issuer who set up no way to withdraw', () => {
+    const r = ok();
+    r.credential = { issuer: { id: 'did:key:z6Mkn', name: 'Springfield College' } };
+    r.log = r.log!.filter((s) => s.id !== 'revocation_status');
+    expect(summarise(r).code).toBe('verified');
+    expect(listChecks(r).find((c) => c.id === 'revocation_status')!.value).toBe(
+      'the issuer set up no way to withdraw this',
+    );
+  });
+});
+
+describe('the marker beside the issuer name agrees with the verdict', () => {
+  // Found in the second review. With no name in the credential, the "no name
+  // at all" return path overwrote the source, so the marker said
+  // "unconfirmed" while the verdict said we simply don't know.
+  it("says 'not checked', not 'unconfirmed', when a registry was unreachable", () => {
+    const r = ok();
+    r.credential = { issuer: 'did:key:z6Mkn' };
+    r.log![3] = {
+      id: 'registered_issuer',
+      valid: false,
+      matchingIssuers: [],
+      uncheckedRegistries: [{ name: 'DCC Registry' }],
+    };
+    const id = issuerIdentity(r);
+    expect(id.source).toBe('unknown');
+    expect(issuerMarker(id.source)).toBe('not checked');
+    expect(summarise(r).code).toBe('registry_unreachable');
+  });
+
+  it("still says 'unconfirmed' when the registries answered and none listed them", () => {
+    const r = ok();
+    r.credential = { issuer: 'did:key:z6Mkn' };
+    r.log![3] = { id: 'registered_issuer', valid: false, matchingIssuers: [], uncheckedRegistries: [] };
+    const id = issuerIdentity(r);
+    expect(id.source).toBe('none');
+    expect(issuerMarker(id.source)).toBe('unconfirmed');
   });
 });

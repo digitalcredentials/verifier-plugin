@@ -211,9 +211,12 @@ export const issuerIdentity = (r: VerificationResponse): IssuerIdentity => {
       ? 'unknown'
       : 'credential';
   if (claimedName) return { name: claimedName, source, registries, unreachable, id };
+  // No name anywhere. `none` says so — but it must not swallow the fact that
+  // a registry was unreachable, or the marker beside the name reads
+  // "unconfirmed" while the verdict says we simply don't know.
   return {
     name: id ?? 'Unknown issuer',
-    source: nothingEstablished ? 'unverifiable' : 'none',
+    source: nothingEstablished ? 'unverifiable' : unreachable.length > 0 ? 'unknown' : 'none',
     registries,
     unreachable,
     id,
@@ -343,16 +346,6 @@ const FATAL: Record<string, Omit<Outcome, 'code'>> = {
   },
 };
 
-/** Every way the withdrawal check fails is the issuer's setup, not a verdict. */
-const REVOCATION_UNAVAILABLE = new Set([
-  'status_list_not_found',
-  'status_list_expired',
-  'status_list_signature_error',
-  'status_list_type_error',
-  'status_list_not_yet_valid',
-  'status_list_error',
-]);
-
 const expiryDate = (r: VerificationResponse): string | undefined => {
   const raw = r.credential?.['validUntil'] ?? r.credential?.['expirationDate'];
   if (typeof raw !== 'string') return undefined;
@@ -468,14 +461,23 @@ export const summarise = (r: VerificationResponse): Outcome => {
 
   // Everything below is "we couldn't check something", in order of how much
   // it costs the person to not know.
+  // A credential that says it can be withdrawn, where the check did not come
+  // back a pass. `failed` already returned above, so this covers every way of
+  // not knowing: a named status-list error, an error we have no name for,
+  // and — the case this missed until review — no revocation step in the log
+  // at all, which is what verifier-core leaves behind for a
+  // `credentialStatus` type it does not recognise. Falling through put a
+  // green "Verified" whose detail said the issuer had not withdrawn it above
+  // a row saying we could not check.
   const revocationError = revocation?.error?.name;
-  if (revocationError && REVOCATION_UNAVAILABLE.has(revocationError)) {
+  if (hasStatusList(r) && !passed(revocation)) {
     return {
       severity: 'unchecked',
       code: 'withdrawal_unknown',
       headline: "We couldn't check whether this was withdrawn",
-      detail:
-        "The issuer's withdrawal list didn't load. That's a problem with their setup, not with your credential.",
+      detail: revocationError
+        ? "The issuer's withdrawal list didn't load. That's a problem with their setup, not with your credential."
+        : "This credential says it can be withdrawn, but not by a method we recognise, so we couldn't look. That's a problem with how it was issued, not with your credential.",
       action: 'Try again in a moment.',
     };
   }
@@ -611,7 +613,9 @@ export const listChecks = (r: VerificationResponse): Check[] => {
         ? 'withdrawn by the issuer'
         : passed(revocation)
           ? 'none by the issuer'
-          : "couldn't check — the issuer's list didn't load",
+          : revocation?.error
+            ? "couldn't check — the issuer's list didn't load"
+            : "couldn't check — not a withdrawal method we recognise",
     });
   }
 
