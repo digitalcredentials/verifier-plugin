@@ -415,8 +415,8 @@ export const summarise = (r: VerificationResponse): Outcome => {
     };
   }
 
-  // Everything left is a pass — but only if the signature actually reported
-  // one. A log with no signature step establishes nothing, and listChecks
+  // Everything left is a pass — but only for the checks that actually
+  // reported. A step missing from the log establishes nothing, and listChecks
   // shows it as "not checked"; the headline must not say otherwise.
   if (!passed(signature)) {
     return {
@@ -425,6 +425,17 @@ export const summarise = (r: VerificationResponse): Outcome => {
       headline: "We couldn't finish checking this",
       detail:
         "We couldn't confirm whether this has been changed since it was issued. That's a problem at our end, not with your credential.",
+      action: 'Try again in a moment.',
+    };
+  }
+
+  if (!passed(expiration)) {
+    return {
+      severity: 'unchecked',
+      code: 'expiry_unchecked',
+      headline: "We couldn't finish checking this",
+      detail:
+        "We couldn't confirm whether this is still within its dates. That's a problem at our end, not with your credential.",
       action: 'Try again in a moment.',
     };
   }
