@@ -15,6 +15,16 @@ const OFFLINE_REGISTRY: Registry[] = [
   { name: 'Local Dev Registry', type: 'dcc-legacy', url: 'http://localhost:5180/fixtures/nope.json' },
 ];
 
+/**
+ * One registry answers, another times out — the realistic production setup,
+ * and the case that hid a contradiction until review: we know who issued
+ * this, so "we couldn't confirm who issued this" was the wrong headline.
+ */
+const ONE_OF_TWO_REGISTRIES: Registry[] = [
+  ...LOCAL_REGISTRY,
+  { name: 'Second Registry', type: 'dcc-legacy', url: 'http://localhost:5180/fixtures/nope.json' },
+];
+
 interface Situation {
   label: string;
   file: string;
@@ -31,6 +41,7 @@ const SITUATIONS: Situation[] = [
   { label: 'Not withdrawn', file: 'not-withdrawn', registries: LOCAL_REGISTRY, note: 'withdrawal list checked and clear' },
   { label: 'Issuer unknown', file: 'verified', registries: [], note: 'genuine, but no registry lists the issuer' },
   { label: 'Registry offline', file: 'verified', registries: OFFLINE_REGISTRY, note: "we couldn't reach the registry" },
+  { label: 'One registry of two down', file: 'verified', registries: ONE_OF_TWO_REGISTRIES, note: 'one answered and recognised the issuer, so this is still a pass' },
   { label: 'Expired', file: 'expired', registries: LOCAL_REGISTRY, note: 'past its end date' },
   { label: 'Withdrawn', file: 'withdrawn', registries: LOCAL_REGISTRY, note: 'the issuer withdrew it' },
   { label: 'Built wrong', file: 'malformed', registries: LOCAL_REGISTRY, note: 'genuine, but missing a field its standard requires' },
