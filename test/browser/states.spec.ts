@@ -110,6 +110,23 @@ test('an unreachable registry reads differently from an unlisted issuer', async 
   expect(offline.action).not.toBe('');
 });
 
+/**
+ * Found in review. The spoken headline was HTML-escaped on its way into a
+ * `textContent` assignment, so a screen reader on the unconfirmed-issuer card
+ * heard "we can&#39;t confirm who issued this". Only a headline carrying an
+ * ASCII apostrophe showed it, which is why every earlier test missed it.
+ */
+test('the spoken verdict is words, not HTML entities', async ({ page }) => {
+  for (const label of ['Issuer unknown', 'Registry offline', 'Built wrong']) {
+    const c = await pick(page, label);
+    expect(c.live, `${label} is read out with an entity in it`).not.toMatch(/&(#\d+|amp|quot|lt|gt);/);
+    expect(c.live).not.toBe('');
+  }
+  // The card itself still escapes, because that path really is HTML.
+  const c = await pick(page, 'Issuer unknown');
+  expect(c.headline).toContain("can't");
+});
+
 test('the result is announced, not only drawn', async ({ page }) => {
   const c = await pick(page, 'Withdrawn');
   expect(c.live).toContain('Problem');

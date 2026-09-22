@@ -408,10 +408,15 @@ const severityPrefix = (severity: string, headline: string): string => {
   return `<span class="sr-only">${label}: </span>`;
 };
 
+/**
+ * Spoken, not drawn. The one caller assigns this to `textContent`, so it must
+ * not be escaped: a screen reader on "we can't confirm who issued this" was
+ * reading out "can&#39;t". The detail appended beside it was already raw.
+ */
 const announce = (severity: string, headline: string): string => {
   const label = SEVERITY_LABEL[severity] ?? '';
   const prefix = headline.toLowerCase().startsWith(label.toLowerCase()) ? '' : `${label}. `;
-  return `${prefix}${esc(headline)}.`;
+  return `${prefix}${headline}.`;
 };
 
 const checkHtml = (c: Check): string => `
