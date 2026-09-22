@@ -448,12 +448,21 @@ export const listChecks = (r: VerificationResponse): Check[] => {
   const issuer = issuerIdentity(r);
   const checks: Check[] = [];
 
+  // Every label is the subject being checked, never a claim about it. A label
+  // phrased as a statement ("Withdrawn by issuer") reads as a finding the
+  // moment its value stops being a plain yes or no — and it also forces the
+  // reader to flip between "yes is good" and "no is good" partway down the
+  // list.
   const signature = steps.get(STEP.signature);
   checks.push({
     id: STEP.signature,
-    label: 'Not changed since issued',
+    label: 'Changes since issued',
     severity: passed(signature) ? 'success' : failed(signature) ? 'error' : 'unchecked',
-    value: passed(signature) ? 'yes' : failed(signature) ? "no — the signature doesn't match" : 'not checked',
+    value: passed(signature)
+      ? 'none'
+      : failed(signature)
+        ? "the signature doesn't match"
+        : 'not checked',
   });
 
   checks.push({
@@ -470,29 +479,44 @@ export const listChecks = (r: VerificationResponse): Check[] => {
             : `${issuer.name} — name comes from the credential; not in any registry we check`,
   });
 
-  // Only show the withdrawal row when the credential offers a way to be
-  // withdrawn. Without one there is no step, nothing failed, and saying "the
-  // list didn't load" would be untrue. The mobile wallet omits it too.
   const revocation = steps.get(STEP.revocation);
-  if (hasStatusList(r)) {
+  if (!hasStatusList(r)) {
+    // No list at all. Nothing failed, and we cannot say it was not withdrawn
+    // either — there was no way to withdraw it. Saying so is for the issuer
+    // debugging their own setup, who otherwise cannot tell this apart from a
+    // list that loaded and came back clean.
     checks.push({
       id: STEP.revocation,
-      label: 'Withdrawn by issuer',
+      label: 'Withdrawal',
+      severity: 'unchecked',
+      value: 'the issuer set up no way to withdraw this',
+    });
+  } else {
+    checks.push({
+      id: STEP.revocation,
+      label: 'Withdrawal',
       severity: failed(revocation) ? 'error' : passed(revocation) ? 'success' : 'unchecked',
       value: failed(revocation)
-        ? 'yes'
+        ? 'withdrawn by the issuer'
         : passed(revocation)
-          ? 'no'
-          : "the issuer's withdrawal list didn't load",
+          ? 'none by the issuer'
+          : "couldn't check — the issuer's list didn't load",
     });
   }
 
   const expiration = steps.get(STEP.expiration);
+  const expired = expiryDate(r);
   checks.push({
     id: STEP.expiration,
-    label: 'Still in date',
+    label: 'Dates',
     severity: failed(expiration) ? 'warning' : passed(expiration) ? 'success' : 'unchecked',
-    value: failed(expiration) ? 'expired' : passed(expiration) ? 'yes' : 'not checked',
+    value: failed(expiration)
+      ? expired
+        ? `expired on ${expired}`
+        : 'expired'
+      : passed(expiration)
+        ? 'in date'
+        : 'not checked',
   });
 
   return checks;

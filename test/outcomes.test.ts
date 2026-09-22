@@ -231,11 +231,32 @@ describe('a credential with no way to be withdrawn', () => {
     ],
   });
 
-  it('does not claim the withdrawal list failed to load', () => {
+  it('says the issuer set up no way to withdraw it, rather than claiming a failure', () => {
     const rows = listChecks(noStatus());
     const withdrawal = rows.find((c) => c.id === 'revocation_status');
-    expect(withdrawal).toBeUndefined();
-    expect(rows.map((r) => r.value).join(' ')).not.toContain("didn't load");
+    expect(withdrawal!.value).toContain('no way to withdraw');
+    // Nothing failed. There was nothing to try.
+    expect(withdrawal!.value).not.toContain("didn't load");
+    expect(withdrawal!.severity).not.toBe('error');
+  });
+
+  it('never labels a row with a claim that could be read as the finding', () => {
+    // "Withdrawn by issuer" reads as a statement the moment its value stops
+    // being a plain yes or no. Labels name the subject; values carry findings.
+    for (const rows of [listChecks(noStatus()), listChecks(ok())]) {
+      for (const row of rows) {
+        expect(row.label.toLowerCase()).not.toContain('withdrawn');
+        expect(row.label.toLowerCase()).not.toContain('not changed');
+      }
+    }
+  });
+
+  it('never makes the reader flip between yes-is-good and no-is-good', () => {
+    // Every value on a fully passing credential reads as good news without
+    // needing a negation.
+    const values = listChecks(ok()).map((c) => c.value);
+    expect(values).not.toContain('no');
+    expect(values).not.toContain('yes');
   });
 
   it('still reports success overall', () => {
