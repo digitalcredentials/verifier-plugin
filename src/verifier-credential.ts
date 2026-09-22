@@ -23,7 +23,17 @@
  */
 
 import { verify, type Registry } from './verify.js';
-import { summarise, listChecks, type Check, type Outcome } from './outcomes.js';
+import {
+  summarise,
+  listChecks,
+  issuerIdentity,
+  issuerMarker,
+  verdictLeads,
+  contentCaveat,
+  type Check,
+  type IssuerIdentity,
+  type Outcome,
+} from './outcomes.js';
 import { summariseCredential, formatDate } from './credential.js';
 import type { VerificationResponse } from './types.js';
 
@@ -63,6 +73,11 @@ const styles = `
   .s-warning { background: var(--vp-warn, #8a5a05); }
   .s-error   { background: var(--vp-bad, #9e2a2a); }
   .s-unchecked { background: var(--vp-unk, #5e6a7c); }
+  .verdict.bare { border-top: 0; margin-top: 0; padding-top: 0; }
+  .caveat { margin: 14px 0 0; font-size: .87rem; color: var(--vp-ink-3, #6e7a8f); }
+  .quiet { margin-top: 6px; }
+  .quiet .title { font-size: 1rem; font-weight: 600; color: var(--vp-ink-2, #47536a); }
+  .quiet .who, .quiet .meta { color: var(--vp-ink-3, #6e7a8f); }
   .headline { font-weight: 700; margin: 0 0 3px; }
   .detail { margin: 0; font-size: .94rem; color: var(--vp-ink-2, #47536a); }
   .action { margin: 8px 0 0; font-size: .94rem; font-style: italic; color: var(--vp-ink-2, #47536a); }
@@ -74,10 +89,13 @@ const styles = `
   button:hover { text-decoration: underline; }
   :focus-visible { outline: 2px solid var(--vp-accent, #24476f); outline-offset: 2px; border-radius: 3px; }
   .checks { margin-top: 14px; padding-top: 13px; border-top: 1px dashed var(--vp-rule-strong, #bfc8d6); }
-  .check { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0;
-           font-size: .9rem; border-bottom: 1px solid var(--vp-rule, #d9dee7); }
+  .check { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 16px;
+           padding: 7px 0; font-size: .9rem; border-bottom: 1px solid var(--vp-rule, #d9dee7); }
+  @container (max-width: 380px) { .check { grid-template-columns: 1fr; } }
   .check:last-child { border-bottom: 0; }
-  .check .v { display: inline-flex; gap: 6px; align-items: flex-start; text-align: right; font-weight: 500; }
+  .check .k { color: var(--vp-ink-2, #47536a); }
+  .check .v { display: inline-flex; gap: 6px; align-items: flex-start; justify-content: flex-end;
+              text-align: right; font-weight: 500; }
   .mark { width: 15px; height: 15px; border-radius: 50%; display: grid; place-items: center;
           font-size: 10px; font-weight: 700; color: #fff; flex: 0 0 auto; margin-top: 3px; }
   .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
@@ -98,12 +116,18 @@ export class VerifierCredential extends HTMLElement {
   #registries?: Registry[];
   #state: 'empty' | 'checking' | 'done' | 'failed' = 'empty';
   #outcome?: Outcome;
+  #issuer?: IssuerIdentity;
+  /** Set when the finding should precede the credential. */
+  #verdictFirst = false;
+  #caveat?: string;
   #checks: Check[] = [];
   #detailsOpen = false;
   /** A credential is waiting for a run that hasn’t happened yet. */
   #pending = false;
   /** Identifies the newest run, so a slow earlier one cannot overwrite it. */
   #runId = 0;
+  /** A run is already queued for the end of this tick. */
+  #scheduled = false;
 
   constructor() {
     super();
@@ -121,9 +145,7 @@ export class VerifierCredential extends HTMLElement {
 
   set credential(value: Record<string, unknown> | undefined) {
     this.#credential = value;
-    this.#outcome = undefined;
-    this.#checks = [];
-    this.#detailsOpen = false;
+    this.#clearResult();
 
     if (!value) {
       // Clearing the credential clears the verdict with it. Leaving the last
@@ -135,21 +157,31 @@ export class VerifierCredential extends HTMLElement {
       return;
     }
 
-    this.#pending = true;
-    if (this.isConnected) void this.#run();
+    this.#schedule();
   }
 
   get credential(): Record<string, unknown> | undefined {
     return this.#credential;
   }
 
+  /** Forgets the last result, so none of it outlives what it described. */
+  #clearResult(): void {
+    this.#outcome = undefined;
+    this.#issuer = undefined;
+    this.#verdictFirst = false;
+    this.#caveat = undefined;
+    this.#checks = [];
+    this.#detailsOpen = false;
+  }
+
   set registries(value: Registry[] | undefined) {
     this.#registries = value;
     if (!this.#credential) return;
     // The registries decide whether we can confirm the issuer, so changing
-    // them changes the answer. Re-check rather than keep a stale verdict.
-    this.#pending = true;
-    if (this.isConnected) void this.#run();
+    // them changes the answer. Clear the old one rather than leave its
+    // details and caveat on screen beside a new check.
+    this.#clearResult();
+    this.#schedule();
   }
 
   get registries(): Registry[] | undefined {
@@ -159,8 +191,29 @@ export class VerifierCredential extends HTMLElement {
   connectedCallback(): void {
     // A credential can be set while the element is detached — React does
     // exactly that on remount — so the work waits here, not in the setter.
-    if (this.#pending && this.#credential) void this.#run();
+    if (this.#pending && this.#credential) this.#schedule();
     else this.#render();
+  }
+
+  /**
+   * Verifies once at the end of the current tick.
+   *
+   * A host normally sets several properties in a row — registries, then the
+   * credential. Running on each one would verify the old credential against
+   * the new registries and throw the result away, doubling every registry and
+   * status-list fetch for an answer nobody sees. Waiting for the tick to
+   * finish means one set of properties produces one check.
+   */
+  #schedule(): void {
+    this.#pending = true;
+    if (!this.isConnected || this.#scheduled) return;
+    this.#scheduled = true;
+    queueMicrotask(() => {
+      this.#scheduled = false;
+      // Re-checked, because the element can be detached between scheduling
+      // and running. The work waits for the next connectedCallback instead.
+      if (this.isConnected && this.#pending && this.#credential) void this.#run();
+    });
   }
 
   async #run(): Promise<void> {
@@ -186,6 +239,9 @@ export class VerifierCredential extends HTMLElement {
       // one being waited for; ours would label it with the wrong verdict.
       if (superseded()) return;
       this.#outcome = summarise(response);
+      this.#issuer = issuerIdentity(response);
+      this.#verdictFirst = verdictLeads(response);
+      this.#caveat = contentCaveat(response);
       this.#checks = listChecks(response);
       this.#state = 'done';
       this.#render();
@@ -217,14 +273,27 @@ export class VerifierCredential extends HTMLElement {
 
     const summary = summariseCredential(this.#credential);
     const issued = formatDate(summary.issuedOn);
-    const meta = [summary.issuerName, issued].filter(Boolean).join(' · ');
+    // The issuer's name carries where it came from, right where the name is.
+    // People scan and read the first thing they meet, so a caveat that only
+    // appears further down is a caveat many people never see.
+    const marker = this.#issuer ? issuerMarker(this.#issuer.source) : undefined;
+    const issuerName = this.#issuer?.name ?? summary.issuerName;
+    const named = issuerName ? `${issuerName}${marker ? ` (${marker})` : ''}` : undefined;
+    const meta = [named, issued].filter(Boolean).join(' · ');
 
-    this.#card.innerHTML = `
+    const content = `
       <p class="title">${esc(summary.title)}</p>
       ${summary.recipient ? `<p class="who">${esc(summary.recipient)}</p>` : ''}
-      ${meta ? `<p class="meta">${esc(meta)}</p>` : ''}
-      ${this.#verdictHtml()}
-    `;
+      ${meta ? `<p class="meta">${esc(meta)}</p>` : ''}`;
+
+    // The finding comes first only when the credential itself is what is in
+    // question. Everywhere else the credential leads, per §4.
+    this.#card.innerHTML = this.#verdictFirst
+      ? `<div class="lead">${this.#verdictHtml({ divider: false })}</div>
+         ${this.#caveat ? `<p class="caveat">${esc(this.#caveat)}</p>` : ''}
+         <div class="quiet">${content}</div>
+         ${this.#foot()}`
+      : `${content}${this.#verdictHtml()}${this.#foot()}`;
 
     if (shouldAnnounce) this.#say(this.#spokenResult());
 
@@ -235,6 +304,15 @@ export class VerifierCredential extends HTMLElement {
       this.#render({ announce: false });
       this.#card.querySelector<HTMLButtonElement>('#toggle')?.focus();
     });
+  }
+
+  /**
+   * The footer says when we checked, so it only belongs on a finished check.
+   * While one is running, or after one failed outright, there is no "just
+   * now" to report.
+   */
+  #foot(): string {
+    return this.#state === 'done' ? this.#footHtml() : '';
   }
 
   /** Writes the live region, leaving the element itself in place. */
@@ -251,10 +329,11 @@ export class VerifierCredential extends HTMLElement {
     return `${announce(o.severity, o.headline)} ${o.detail}`;
   }
 
-  #verdictHtml(): string {
+  #verdictHtml(options: { divider?: boolean } = {}): string {
+    const cls = options.divider === false ? 'verdict bare' : 'verdict';
     if (this.#state === 'checking') {
       return `
-        <div class="verdict">
+        <div class="${cls}">
           <span class="glyph s-unchecked" aria-hidden="true">↻</span>
           <div><p class="headline">Checking…</p></div>
         </div>`;
@@ -262,7 +341,7 @@ export class VerifierCredential extends HTMLElement {
 
     if (this.#state === 'failed' || !this.#outcome) {
       return `
-        <div class="verdict">
+        <div class="${cls}">
           <span class="glyph s-unchecked" aria-hidden="true">${GLYPH['unchecked']}</span>
           <div>
             <p class="headline">We couldn’t finish checking this</p>
@@ -277,7 +356,7 @@ export class VerifierCredential extends HTMLElement {
     // the headline already says the same word, saying it twice is noise.
     const spoken = severityPrefix(o.severity, o.headline);
     return `
-      <div class="verdict">
+      <div class="${cls}">
         <span class="glyph s-${o.severity}" aria-hidden="true">${GLYPH[o.severity]}</span>
         <div>
           <p class="headline">${spoken}${esc(o.headline)}</p>
@@ -285,16 +364,21 @@ export class VerifierCredential extends HTMLElement {
           ${o.action ? `<p class="action">${esc(o.action)}</p>` : ''}
         </div>
       </div>
-      ${this.#checks.length ? this.#footHtml() : ''}`;
+      `;
   }
 
   #footHtml(): string {
+    // Verification that stopped early has no per-check list to open, but it
+    // was still checked, and the card should say so.
+    const toggle = this.#checks.length
+      ? `<button id="toggle" type="button" aria-expanded="${this.#detailsOpen}" aria-controls="checks">
+           ${this.#detailsOpen ? 'Hide details' : 'Show details'}
+         </button>`
+      : '';
     return `
       <div class="foot">
         <span>Checked just now</span>
-        <button id="toggle" type="button" aria-expanded="${this.#detailsOpen}" aria-controls="checks">
-          ${this.#detailsOpen ? 'Hide details' : 'Show details'}
-        </button>
+        ${toggle}
       </div>
       ${this.#detailsOpen ? `<div class="checks" id="checks">${this.#checks.map(checkHtml).join('')}</div>` : ''}`;
   }
@@ -319,7 +403,7 @@ const announce = (severity: string, headline: string): string => {
 
 const checkHtml = (c: Check): string => `
   <div class="check">
-    <span>${esc(c.label)}</span>
+    <span class="k">${esc(c.label)}</span>
     <span class="v">
       <span class="mark s-${c.severity}" aria-hidden="true">${GLYPH[c.severity]}</span>
       <span><span class="sr-only">${SEVERITY_LABEL[c.severity]}: </span>${esc(c.value)}</span>

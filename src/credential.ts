@@ -50,9 +50,12 @@ export const formatDate = (value: string | undefined): string | undefined => {
   if (!value) return undefined;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
+  // UTC, for the same reason as the expiry date in outcomes.ts: a credential's
+  // dates belong to the credential, not to the reader's timezone.
   return date.toLocaleDateString('en-GB', {
     day: 'numeric',
     month: 'long',
     year: 'numeric',
+    timeZone: 'UTC',
   });
 };

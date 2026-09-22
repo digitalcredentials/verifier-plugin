@@ -22,7 +22,7 @@
     "type": [
       "AchievementSubject"
     ],
-    "name": "Someone Else",
+    "name": "Robin Whitaker",
     "achievement": {
       "id": "urn:uuid:5c8b3d10-6f44-4e2a-8b6f-1d0c9a7e2b35",
       "type": [
@@ -38,9 +38,9 @@
   },
   "proof": {
     "type": "Ed25519Signature2020",
-    "created": "2026-09-21T23:12:59Z",
+    "created": "2026-09-22T14:36:10Z",
     "verificationMethod": "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z#z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z",
     "proofPurpose": "assertionMethod",
-    "proofValue": "znEPc7oHJfv1XHwWsdrvAEcaPYp3Q2Kca2FPxgNEVfMYaeYSJEoctaBVJuszmpk6h7dXmTJ3Atd3fzx25dDkVNVj"
+    "proofValue": "z2RFKBuwsZVbFHRdjTj7uZkvYYPj7n1Bzy2KYYNKPPnNNmbSPWuukAwYXCmkfpzKbmFBDQ35YsTjypZrAwDWyLbp1"
   }
 }
