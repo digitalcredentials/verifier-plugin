@@ -69,3 +69,11 @@ dist
 test-results
 playwright-report
 *.tsbuildinfo
+
+# Session handoffs. Ephemeral by design: written to start one fresh session
+# with the last one's context, and stale as soon as the next thing lands.
+# Ignored so they cannot be committed by accident — twice now, a handoff has
+# ended up in a repo's permanent history, where it rots and misleads whoever
+# reads it next. Anything inside one that is genuinely durable belongs in
+# requirements.md or the README, promoted deliberately.
+HANDOFF.md
