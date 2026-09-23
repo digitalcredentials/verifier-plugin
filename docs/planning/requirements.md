@@ -499,11 +499,12 @@ message and keep the code in the copyable output.
    settled — a separate repository, agreed 21 September. The question underneath
    it isn't. The point stands: displaying credentials, verifying them, and
    deciding whether to keep a received one all look like core wallet
-   capabilities, and he has asked plainly what the goals for plugins are, what
-   a plugin is, how one gets enabled or disabled, and how it is allowed to touch
-   the user's data and the rest of the app. One view is that the plugin
-   requirements should be discussed before the implementation is chosen. Until
-   that happens, the shape described in section 2 stays provisional.
+   capabilities. The questions asked plainly, and still unanswered: what the
+   goals for plugins are, what a plugin is, how one gets enabled or disabled,
+   and how it is allowed to touch the user's data and the rest of the app. One
+   view is that the plugin requirements should be discussed before the
+   implementation is chosen. Until that happens, the shape described in
+   section 2 stays provisional.
 2. Does the direction in sections 4 and 5 look right?
 
 **On verifier-core and intake**
