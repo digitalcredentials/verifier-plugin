@@ -91,6 +91,13 @@ through the document loader, which sets headers.
 So "we can't confirm who issued this" is a genuine gap in registry coverage,
 not a bug of ours.
 
+**Schema fetches are fine too.** Added 22 September: verifier-core validates
+Open Badges credentials against a schema it fetches from `purl.imsglobal.org`,
+and that request is a simple `GET` like the registry lookup, so it is not
+preflighted. The browser test for the "Built wrong" state exercises it end to
+end against the real published schema. So of the three things this library
+fetches, only the status list is blocked.
+
 **One thing the fix needs, that we can't do from here.** verifier-core builds
 its document loader at module scope and `verifyCredential` takes no loader
 argument, so there is no way to supply the veri-good workaround from outside
