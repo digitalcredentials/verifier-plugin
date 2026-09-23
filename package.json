@@ -26,7 +26,7 @@
     "fixtures": "node scripts/make-fixtures.js"
   },
   "dependencies": {
-    "@digitalcredentials/verifier-core": "1.0.0-beta.11"
+    "@digitalcredentials/verifier-core": "github:skybridgeskills/dcc-verifier-core#7ac1e0918a84b74f6abf8d50baa896fc749c69f3"
   },
   "devDependencies": {
     "@digitalcredentials/ed25519-signature-2020": "^6.0.0",
