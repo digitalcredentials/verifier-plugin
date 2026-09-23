@@ -108,10 +108,18 @@ for any credential that carries a status list.
 ## Design
 
 The requirements and the list of everything verification can report live in
-`dcc-plans`, under `plans/dcc-platform/2026-09-16-wallet-verification/`:
+[`docs/planning/`](docs/planning/):
 
-- `requirements.md` — when verification runs, and what it shows
-- `inventory.md` — all 19 outcomes the library can report
+- [`requirements.md`](docs/planning/requirements.md) — when verification runs,
+  and what it shows. `src/outcomes.ts` cites its §4 and §5 by number: those
+  sections are the specification this component implements.
+- [`inventory.md`](docs/planning/inventory.md) — everything verifier-core can
+  report, in two tiers.
+
+They live here rather than in a planning repo so they move with the code. A
+change in behaviour that leaves them untouched should look wrong in review —
+which is how §4 came to describe something its own implementation no longer
+did.
 
 In short: four severity levels that don't grow (success, warning, error, and
 "we couldn't check"), a list of messages that does grow, plain language for the
