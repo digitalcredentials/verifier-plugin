@@ -696,9 +696,10 @@ describe('an unreachable registry when another one answered', () => {
   });
 });
 
-describe('a withdrawal method we do not recognise', () => {
+describe('a withdrawal check that never ran', () => {
   // Found in the second review. verifier-core leaves no revocation step at
-  // all for a `credentialStatus` type it does not know, which is not the
+  // all when it never gets that far — a `credentialStatus` type it does not
+  // know, or an earlier failure that stopped verification — which is not the
   // same as the issuer providing no way to withdraw. The verdict fell
   // through to a green "Verified" whose detail said the issuer had not
   // withdrawn it, above a row saying we could not check.
@@ -719,20 +720,20 @@ describe('a withdrawal method we do not recognise', () => {
     expect(out.detail).not.toContain("hasn't withdrawn");
   });
 
-  it('says why, and does not blame a list that never loaded', () => {
-    // There was no fetch to fail. Saying the list "didn't load" invents a
-    // cause, and points an issuer at the wrong thing.
+  it('does not invent a cause it cannot establish', () => {
+    // Two rounds of getting this wrong in opposite directions. "The list
+    // didn't load" blames a fetch that never happened; "not a method we
+    // recognise" blames the issuer for what is often just verification
+    // stopping earlier. The log cannot tell them apart, so neither do we.
     const out = summarise(unrecognised());
-    expect(out.detail).toContain('not by a method we recognise');
+    expect(out.detail).toContain('never ran');
     expect(out.detail).not.toContain("didn't load");
+    expect(out.detail).not.toContain('recognise');
   });
 
   it('reads the same way in the breakdown', () => {
     const row = listChecks(unrecognised()).find((c) => c.id === 'revocation_status');
-    expect(row).toMatchObject({
-      severity: 'unchecked',
-      value: "couldn't check — not a withdrawal method we recognise",
-    });
+    expect(row).toMatchObject({ severity: 'unchecked', value: 'not checked' });
   });
 
   it('is still told apart from an issuer who set up no way to withdraw', () => {
@@ -772,5 +773,50 @@ describe('the marker beside the issuer name agrees with the verdict', () => {
     const id = issuerIdentity(r);
     expect(id.source).toBe('none');
     expect(issuerMarker(id.source)).toBe('unconfirmed');
+  });
+});
+
+describe('a json-ld failure that is not the first error', () => {
+  // Found in the third review. verifier-core reaches its json-ld branch by
+  // finding such an error anywhere in the list; we read only the first, so a
+  // credential whose vocabulary cannot be parsed was told to try again in a
+  // moment — advice that can never work for a failure retrying won't change.
+  const withErrors = (...names: string[]): VerificationResponse => ({
+    credential,
+    errors: names.map((name) => ({ name, message: 'x' })),
+  });
+
+  it('is recognised wherever it sits in the list', () => {
+    expect(summarise(withErrors('jsonld.ValidationError')).code).toBe('unreadable_vocabulary');
+    expect(summarise(withErrors('someOtherThing', 'jsonld.ValidationError')).code).toBe(
+      'unreadable_vocabulary',
+    );
+  });
+
+  it('offers advice that can actually help', () => {
+    const out = summarise(withErrors('someOtherThing', 'jsonld.ValidationError'));
+    expect(out.action).toContain('replacement');
+    expect(out.action).not.toContain('Try again');
+  });
+
+  it('still falls back when no error is a json-ld one', () => {
+    expect(summarise(withErrors('someOtherThing', 'andAnother')).code).toBe('unknown_error');
+  });
+});
+
+describe('a response that does not echo the credential back', () => {
+  // Found in the third review. verifier-core's outer catch returns
+  // `{ errors: [{ name: UNKNOWN_ERROR }] }` with no `credential` — any
+  // unexpected throw inside vc.verifyCredential lands there. Every fixture
+  // we have is well-formed enough to reach a structured fatal path instead,
+  // which is why this never showed up in the browser.
+  it('has no name to offer, which is why the component supplies one', () => {
+    const noCredential: VerificationResponse = { errors: [{ name: 'unknown_error', message: 'x' }] };
+    expect(issuerIdentity(noCredential).name).toBe('Unknown issuer');
+    // The component was handed the credential, so it passes it in. Without
+    // that, a card whose credential plainly names its issuer says "Unknown
+    // issuer" — and `?? summary.issuerName` never fires, because a name is
+    // always returned.
+    expect(issuerIdentity({ ...noCredential, credential }).name).toBe('Springfield College');
   });
 });
