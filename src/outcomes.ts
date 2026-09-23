@@ -284,6 +284,15 @@ export const contentCaveat = (r: VerificationResponse): string | undefined =>
  */
 const isJsonLdError = (name: string): boolean => name.toLowerCase().includes('jsonld');
 
+/**
+ * verifier-core reaches its json-ld branch by finding such an error anywhere
+ * in the list, so reading only the first one sends a credential whose
+ * vocabulary cannot be parsed to "try again in a moment" — advice that can
+ * never work, for a failure retrying will never change.
+ */
+const anyJsonLdError = (errors: VerificationResponse['errors']): boolean =>
+  (errors ?? []).some((e) => typeof e?.name === 'string' && isJsonLdError(e.name));
+
 const FATAL: Record<string, Omit<Outcome, 'code'>> = {
   unreadable_vocabulary: {
     severity: 'error',
@@ -406,7 +415,7 @@ export const summarise = (r: VerificationResponse): Outcome => {
     // must not become one by leaking through.
     const code = Object.hasOwn(FATAL, raw)
       ? raw
-      : isJsonLdError(raw)
+      : anyJsonLdError(r.errors)
         ? 'unreadable_vocabulary'
         : 'unknown_error';
     return { code, ...FATAL[code]! };
@@ -497,7 +506,7 @@ export const summarise = (r: VerificationResponse): Outcome => {
       headline: "We couldn't check whether this was withdrawn",
       detail: revocationError
         ? "The issuer's withdrawal list didn't load. That's a problem with their setup, not with your credential."
-        : "This credential says it can be withdrawn, but not by a method we recognise, so we couldn't look. That's a problem with how it was issued, not with your credential.",
+        : "This credential says it can be withdrawn, but that check never ran, so we can't tell you either way. That's a problem at our end, not with your credential.",
       action: 'Try again in a moment.',
     };
   }
@@ -641,7 +650,7 @@ export const listChecks = (r: VerificationResponse): Check[] => {
           ? 'none by the issuer'
           : revocation?.error
             ? "couldn't check — the issuer's list didn't load"
-            : "couldn't check — not a withdrawal method we recognise",
+            : 'not checked',
     });
   }
 
