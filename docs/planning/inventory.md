@@ -7,7 +7,7 @@ This is the raw material for the product decisions: every distinct thing
 verification can tell us, and what each one means in plain language.
 
 Compiled by reading `@digitalcredentials/verifier-core` 1.0.0-beta.11 as
-published, not from documentation. Nate's refined fork
+published, not from documentation. The refined fork
 (`skybridgeskills/dcc-verifier-core`) groups these into named layers and adds
 non-blocking severity; it is **not published to npm**, so anything depending on
 it depends on a git reference until it lands upstream.
@@ -95,7 +95,7 @@ the list of registries it couldn't load, naming each one. So a display that
 reads `valid` and stops will show "issuer not recognised" whenever the network
 fails. See `requirements.md` §4.
 
-> **Open question for Nate — the two lists don't match between the running code
+> **Open question — the two lists don't match between the running code
 > and the published package.** Confirmed by reading both on 21 September. The
 > runtime attaches them as `matchingIssuers` and `uncheckedRegistries`; the
 > published TypeScript declaration for a step names them `foundInRegistries` and
@@ -148,7 +148,7 @@ affect validity.
 
 `schema_check` validates the credential against the Open Badges v3 schemas —
 either the one the credential names, or one guessed from its context. This is
-the case Nate raised: a genuine, unwithdrawn credential that is slightly
+the case raised in review: a genuine, unwithdrawn credential that is slightly
 malformed.
 
 ### B4. Locally decided, not from the library
