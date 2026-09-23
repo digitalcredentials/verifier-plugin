@@ -14,7 +14,15 @@ when something is wrong.
 
 ## Status
 
-Just started. Nothing here yet beyond this README.
+Working. A `<verifier-credential>` web component: a real credential in, real
+verification, one card out. Nine situations render correctly from genuinely
+signed fixtures.
+
+Two pull requests merged on 23 September 2026. 811 unit tests and 22 in
+Chromium; lint, typecheck and build run on every push.
+
+It has **not** been run inside React or the wallet yet, which is the point of
+it, and no screen reader has heard it. See **Open questions**.
 
 ## Decisions so far
 
@@ -27,9 +35,15 @@ From the standup on 21 September 2026:
   added around it. Sharing and QR codes are separate plugins; viewing a
   credential may become one too.
 - **Verification library: `@digitalcredentials/verifier-core`**, the published
-  one. Nate has a fork with more in it — checks grouped into suites, added
-  dynamically by credential type, and a richer result log. He and James will
-  work out whether that lands upstream. Switching later is cheap.
+  one. *Which* version was settled on 22 September: whatever `verifier-plus`
+  uses. That is `^1.0.0-beta.7`, resolving to `1.0.0-beta.11`, which is what
+  this pins.
+
+  Nate is building on a 2.x that is not published yet — checks grouped into
+  suites by phase, dotted check ids, presentation and per-credential results
+  separated. Worth knowing that it carries `skipped`-with-a-reason and a
+  per-check `fatal` flag as first-class, both of which are hand-built here. So
+  the mapping gets thinner when it lands, not thicker.
 - **veri-good is a reference, not a foundation.** It was an experiment, it
   targets a different setting (an issuer's own web page), and nobody uses it.
   Worth learning from, not worth inheriting.
@@ -108,8 +122,10 @@ A first slice: a real credential in, real verification, one card out.
 | `src/verify.ts` | Runs verifier-core. Deliberately thin |
 | `src/credential.ts` | Pulls out the few fields we display |
 | `src/verifier-credential.ts` | The `<verifier-credential>` web component |
-| `test/outcomes.test.ts` | 29 tests, mostly on the ways a good credential can be made to look bad |
-| `test/browser/states.spec.ts` | 10 tests driving the component in a real browser |
+| `src/index.ts` | The public surface |
+| `test/outcomes.test.ts` | The mapping, and the ways a good credential can be made to look bad |
+| `test/consistency.test.ts` | 720 combinations asserting the headline and the breakdown can never disagree |
+| `test/browser/states.spec.ts` | 22 tests driving the component in a real browser |
 | `scripts/make-fixtures.js` | Builds the test credentials, really signed |
 
 ```
@@ -119,6 +135,28 @@ npm run test:browser  # the component, in Chromium, verifying for real
 npm run dev         # look at it
 npm run fixtures    # rebuild the test credentials
 ```
+
+### Changing `src/outcomes.ts`
+
+`summarise()` and `listChecks()` describe the same credential, and the one bug
+this code keeps producing is the two of them disagreeing. Ten defects were
+found across four reviews of the first two pull requests, and six were that —
+a clean verdict above a row reporting a problem, or a headline claiming in
+prose what the breakdown said was never checked.
+
+`test/consistency.test.ts` walks 720 combinations and asserts both: that the
+severities agree, and that no verdict claims the credential is unchanged or
+not withdrawn unless the row it rests on actually reported. Run it if you
+touch either function.
+
+Two rules fall out of it, both learned the hard way:
+
+- **Say only what reported.** The reassurance beside a finding is assembled in
+  one place from the checks that came back. Writing it as fixed text is how it
+  went wrong three times.
+- **Do not name a cause the log cannot establish.** A withdrawal check that
+  left no step behind might be an unrecognised status method, or verification
+  stopping earlier. The row says "not checked" and guesses at neither.
 
 ### The test credentials
 
@@ -137,6 +175,7 @@ The dev page covers every state the design has to handle:
 | Registry offline | we couldn't reach the registry — deliberately a different message |
 | Expired | past its end date |
 | Withdrawn | the issuer withdrew it |
+| Built wrong | genuine, but missing a field its own standard requires |
 | Changed | altered after signing |
 | No signature | nothing to check |
 
@@ -156,10 +195,25 @@ all until that's fixed upstream.
   does.
 - **The formal plugin interface** is being worked out separately, with the
   community. Whatever gets built here should expect to adapt.
-- **What do we say about a credential with no withdrawal list?** Right now the
-  row is simply absent, matching the mobile wallet. Saying nothing may be
-  right; it may also be worth a plain line saying the issuer provided no way to
-  withdraw it. Sunny's call.
+
+**Settled since**: a credential with no withdrawal list now says so, in the
+details only. Nothing failed and there was nothing to try, so it reads as no
+information rather than as a problem — silence was fine for the person who
+earned the credential, but an issuer debugging their own badge could not tell
+a missing list apart from one that loaded and came back clean.
+
+Open on the wording, and none of them are bugs:
+
+- **Does the "How it was built" row earn its place?** Every card ends with it,
+  and on a good credential it says "as the standard expects" — a row almost
+  nobody needs, on the screen almost everybody sees.
+- **Should a warning also reassure?** "This credential is missing information
+  it should have" is followed by "Nothing has changed since it was issued, and
+  the issuer hasn't withdrawn it." The breakdown already says both.
+- **Does "There's nothing for you to do" reassure, or dismiss?** It comes from
+  Nate's remark that most of these are not errors the holder could resolve
+  themselves. It is the point of that outcome and the least settled part of
+  it.
 
 ## Licence
 
