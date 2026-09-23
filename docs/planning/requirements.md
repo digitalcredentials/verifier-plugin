@@ -71,12 +71,12 @@ exceptions, rather than an open invitation to redesign everything.
 Two things sit right at the edge of this document, and we have not agreed
 whether they are in December:
 
-- **Getting credentials into the wallet.** Nate has built architecture for
-  this already and has asked to talk through which parts may need discussion
-  before they land.
+- **Getting credentials into the wallet.** Architecture for this already
+  exists, and there is a standing request to walk through which parts may need
+  discussion before they land.
 - **Sharing credentials out.**
 
-James has pointed out that the mobile wallet does both, so a web wallet that
+It has been pointed out that the mobile wallet does both, so a web wallet that
 does neither isn't really a replacement. That is hard to argue with. But these
 are much larger than verification, and they belong to other people's plans.
 
@@ -87,27 +87,27 @@ and someone needs to confirm the rest is on a plan somewhere.
 
 ### The shape of the thing, provisionally
 
-Discussed 21 September with Nate, James and Kerri. The real plugin interface
-gets defined later with Kerri's community group, so the job now is to explore
-what it could look like, pick something, and write down why. This is that
-record, and it is provisional on purpose.
+Discussed by the team on 21 September. The real plugin interface gets defined
+later with the community group, so the job now is to explore what it could
+look like, pick something, and write down why. This is that record, and it is
+provisional on purpose.
 
-**A web component.** Kerri and Nate both lean this way, on the grounds that the
-wallet is meant to be swappable. James notes it matters less than it sounds:
-only the credential goes in, and turning one kind of component into the other
-is cheap — React has supported web components since version 19. So this is a
-starting point, not a commitment.
+**A web component.** The team leans this way, on the grounds that the wallet
+is meant to be swappable. It matters less than it sounds, though: only the
+credential goes in, and turning one kind of component into the other is cheap
+— React has supported web components since version 19. So this is a starting
+point, not a commitment.
 
-**What goes in.** James's expectation, and the simplest thing that works: the
+**What goes in.** The expectation, and the simplest thing that works: the
 credential, and possibly a set of issuer identifiers to check against. Nothing
 else.
 
-**What it owns.** Nate thinks all three — showing the credential, showing the
+**What it owns.** All three — showing the credential, showing the
 verification, and running the verification. That seems right, and it is what
 this document assumes throughout.
 
 **One constraint worth knowing now, because it shapes the design rather than
-the code.** Nate's point: a web component sits behind a boundary, and things
+the code.** A web component sits behind a boundary, and things
 the surrounding app owns don't reach across it. It can't use the wallet's own
 navigation to link out to other screens, and it can't open the wallet's own
 dialogs. Anything this document describes as opening for more detail — the
@@ -129,9 +129,9 @@ This came up and we decided against it for now. The reasoning is worth
 keeping, because it will come up again.
 
 The argument for caching is that verification makes network calls to other
-people's servers. Nate watched log monitoring during the California statewide
-wallet pilot, where Digital Bazaar was hosting status endpoints for issuers.
-Wallets varied a lot in how often they fetched, and Digital Bazaar was worried
+people's servers. During the California statewide wallet pilot, where Digital
+Bazaar was hosting status endpoints for issuers, log monitoring showed that
+wallets varied a lot in how often they fetched, and Digital Bazaar was worried
 about the frequent ones once a statewide rollout multiplied them.
 
 The argument against doing it now, which is the one we're taking:
@@ -141,8 +141,8 @@ The argument against doing it now, which is the one we're taking:
   with other vendors' credentials, always re-checking is a feature. A cache
   hides the bug you're trying to reproduce.
 - **It gets easier later, not harder.** Where results would be stored depends
-  on the storage layer, which isn't settled. Nate called that the more
-  important piece, and it comes first.
+  on the storage layer, which isn't settled. That is the more important piece,
+  and it comes first.
 
 **What would bring this back:** the storage layer settling, or us actually
 seeing a load problem.
@@ -167,8 +167,8 @@ Worth recording accurately, because we got this wrong once.
 
 The mobile app has a fifteen-minute cache, but **the credential detail screen
 deliberately skips it** — it passes a flag that forces a fresh check every
-time. The badges in the credential list do use the cache. So James is right
-that opening a credential re-checks it; that's by design, not an oversight.
+time. The badges in the credential list do use the cache. So opening a
+credential does re-check it; that's by design, not an oversight.
 
 The two paths also don't return quite the same thing. The fresh one includes a
 timestamp and reads the list of checks from one place in the response; the
@@ -179,11 +179,11 @@ kind of thing to be careful about if we ever do add caching.
 ### One thing we do need
 
 **An unreachable registry has to be handled properly.** This is separate from
-caching, and both James and Nate agree on it.
+caching, and it is agreed.
 
-Our issuer registries are files hosted on GitHub Pages. Nate has seen one fail
-to load, and another organisation reported verification trouble when relying
-on them. GitHub's bandwidth limits are high enough that throttling is
+Our issuer registries are files hosted on GitHub Pages. One has been seen to
+fail to load, and another organisation reported verification trouble when
+relying on them. GitHub's bandwidth limits are high enough that throttling is
 unlikely, so this is probably ordinary network flakiness — which means caching
 wouldn't fix it anyway. We have to handle it either way.
 
@@ -431,8 +431,8 @@ sending a credential to someone, and we never say what their software will
 show. The sequence that costs the most trust is easy to picture: our wallet
 says verified, the person sends it, the recipient's checker says "unknown
 issuer," and they look like they're passing off a fake. So: **our wording must
-never promise more than the recipient's software will show.** As Nate put it,
-whoever they share with is going to run into the same thing we did, and the
+never promise more than the recipient's software will show.** Whoever they
+share with is going to run into the same thing we did, and the
 person shouldn't be surprised by that.
 
 **Someone could abuse this.** Every outcome in `inventory.md` assumes an
@@ -461,13 +461,13 @@ live.
 What would change it: the storage layer settling, or an actual load problem.
 
 **Where results are stored.**
-Nate's eventual picture is a small verification history per credential kept in
+The eventual picture is a small verification history per credential kept in
 the user's cloud storage, with revocation checked more often than everything
 else. Deliberately undecided, because it follows the storage layer.
 
 **Different freshness rules per check.**
-Signatures never change. Expiry is a date. Revocation genuinely changes. Nate's
-point that these deserve different treatment is right, and it's the frame to
+Signatures never change. Expiry is a date. Revocation genuinely changes. That
+these deserve different treatment is right, and it's the frame to
 pick up when caching comes back. Not now.
 
 **Working offline.**
@@ -478,13 +478,13 @@ an interview. What survives is simply not showing a red error when the real
 answer is "no network," and that's already the info severity.
 
 **Letting people name issuers themselves.**
-Nate's idea: someone could say "this is University of Oregon Libraries" and
+One idea: someone could say "this is University of Oregon Libraries" and
 have it remembered. Given how far behind registry coverage is, giving people a
 way to resolve these themselves is probably important eventually. Worth
 designing once registries are further along.
 
 **Showing raw error codes.**
-Nate is right to question this. Those codes come from a library still in beta,
+This is worth questioning. Those codes come from a library still in beta,
 and putting them on screen quietly turns them into something people depend on.
 Either we decide they're a stable published interface, or we show a stable
 message and keep the code in the copyable output.
@@ -493,20 +493,20 @@ message and keep the code in the copyable output.
 
 ## 7. Decisions we need
 
-**For Kerri**
+**On the plugin model**
 
 1. **What is a plugin here, and what are plugins for?** Where the code lives is
    settled — a separate repository, agreed 21 September. The question underneath
-   it isn't. Nate's point stands: displaying credentials, verifying them, and
+   it isn't. The point stands: displaying credentials, verifying them, and
    deciding whether to keep a received one all look like core wallet
    capabilities, and he has asked plainly what the goals for plugins are, what
    a plugin is, how one gets enabled or disabled, and how it is allowed to touch
-   the user's data and the rest of the app. Kerri's view is that the plugin
+   the user's data and the rest of the app. One view is that the plugin
    requirements should be discussed before the implementation is chosen. Until
    that happens, the shape described in section 2 stays provisional.
 2. Does the direction in sections 4 and 5 look right?
 
-**For Nate**
+**On verifier-core and intake**
 
 3. Is the improved version of verifier-core going into the published package,
    or do we depend on the fork directly? It isn't published today.
@@ -519,7 +519,7 @@ message and keep the code in the copyable output.
 5. Time to walk through the credential intake architecture you've built, and
    what may need discussion before it lands.
 
-**For the three of us**
+**On the size of December**
 
 6. **Are intake and sharing in December?** This is the big one. It changes the
    size of the release, not just this document.
