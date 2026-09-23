@@ -17,4 +17,4 @@ export {
   type SchemaFinding,
 } from './outcomes.js';
 export { summariseCredential, formatDate, type CredentialSummary } from './credential.js';
-export type { Severity, VerificationResponse, VerificationStep } from './types.js';
+export type { Severity, VerificationResponse, CheckResult } from './types.js';
