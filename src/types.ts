@@ -104,6 +104,8 @@ export interface VerificationResponse {
  * joined. Reproduced here exactly as it arrives.
  */
 export const CHECK = {
+  /** A document that could not be parsed as a credential at all. */
+  envelope: 'cryptographic.parsing.envelope',
   contextExists: 'cryptographic.core.context-exists',
   vcContext: 'cryptographic.core.vc-context',
   credentialId: 'cryptographic.core.credential-id',
@@ -179,5 +181,20 @@ export const TAMPERED_MARKERS = ['Verification error'] as const;
  * so rendering §5 means reading these sentences. Raised on verifier-core#32;
  * `RegistryLookupResult` on the payload would retire all of this.
  */
-export const REGISTRY_FOUND_MARKER = /Issuer found in (?:\d+ )?registr(?:y|ies): /;
-export const REGISTRY_UNCHECKED_MARKER = /\d+ registries could not be checked: /;
+export const REGISTRY_FOUND =
+  /Issuer found in (?:\d+ )?registr(?:y|ies): (.+?)(?=\. \d+ registries could not be checked:|$)/;
+export const REGISTRY_UNCHECKED = /\d+ registries could not be checked: (.+)$/;
+
+/**
+ * The three structural failures `context-check` reports, all under the title
+ * "Invalid JSON-LD" — so the title cannot tell a missing `@context` apart from
+ * vocabulary the processor could not read. These say the credential is put
+ * together wrong; anything else carrying json-ld in its prose is the
+ * processing failure, which has different advice because retrying cannot fix
+ * it. Raised on verifier-core#32.
+ */
+export const STRUCTURAL_CONTEXT_DETAILS = [
+  'No verifiable credential found in subject.',
+  'Credential is missing required @context property.',
+  'Credential @context property is empty.',
+] as const;

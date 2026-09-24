@@ -1018,3 +1018,150 @@ describe('a response that does not echo the credential back', () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// From the adversarial review of the 2.x migration
+// ---------------------------------------------------------------------------
+
+describe('findings from the review of the 2.x migration', () => {
+  it('treats a document that is not a credential as having stopped', () => {
+    // `cryptographic.parsing.envelope` runs before the core suite, and leaving
+    // it out of `stoppedEarly` rendered `{"hello":"world"}` as a card with
+    // five breakdown rows and no caveat on the content.
+    const r: VerificationResponse = {
+      verified: false,
+      results: [
+        fail(
+          CHECK.envelope,
+          [{ type: PROBLEM.proofVerification, title: 'Invalid Envelope', detail: 'not a VC' }],
+          true,
+        ),
+      ],
+    };
+    expect(listChecks(r)).toEqual([]);
+    expect(summarise(r).severity).not.toBe('success');
+  });
+
+  it('caveats the content whenever the signature did not pass', async () => {
+    const { contentCaveat, verdictLeads } = await import('../src/outcomes.js');
+    // 1.x reached this through the fatal path. 2.x keeps running the other
+    // suites, so without this a tampered credential rendered a green issuer
+    // row and no caveat — the details presented as confirmed.
+    const r = ok();
+    set(r, tamperedSignature());
+    expect(contentCaveat(r)).toBeDefined();
+    expect(verdictLeads(r)).toBe(true);
+
+    const fine = ok();
+    expect(contentCaveat(fine)).toBeUndefined();
+    expect(verdictLeads(fine)).toBe(false);
+  });
+
+  it('does not assert expiry from a date nothing has vouched for', () => {
+    // The signature failed for an unrelated reason and the credential says it
+    // ran out. We cannot stand behind that date, so "Expired on …" would
+    // state as fact something no check established.
+    const r = ok();
+    r.verifiableCredential = { ...credential, validUntil: '2026-01-09T10:00:00Z' };
+    set(
+      r,
+      fail(
+        CHECK.signature,
+        [{ type: PROBLEM.proofVerification, title: 'Proof Verification Error', detail: 'no key' }],
+        true,
+      ),
+    );
+    expect(summarise(r).code).not.toBe('expired');
+    expect(listChecks(r).find((c) => c.id === `${CHECK.signature}#dates`)?.severity).toBe(
+      'unchecked',
+    );
+  });
+
+  it('separates a malformed credential from one whose vocabulary cannot be read', () => {
+    // context-check titles all three of its structural failures "Invalid
+    // JSON-LD", so the title alone sent an empty @context to "ask the issuer
+    // for a replacement" — advice for a different problem.
+    const structural = (detail: string): VerificationResponse => ({
+      verified: false,
+      verifiableCredential: { ...credential },
+      results: [
+        fail(CHECK.contextExists, [{ type: PROBLEM.proofVerification, title: 'Invalid JSON-LD', detail }], true),
+      ],
+    });
+    expect(summarise(structural('Credential @context property is empty.')).code).toBe(
+      'invalid_jsonld',
+    );
+    expect(summarise(structural('Credential is missing required @context property.')).code).toBe(
+      'invalid_jsonld',
+    );
+    // A genuine processing failure still gets its own advice.
+    expect(summarise(structural('jsonld dereferencing failed for the term')).code).toBe(
+      'unreadable_vocabulary',
+    );
+  });
+
+  it('does not call a mixed schema failure "missing information"', () => {
+    // Every Ajv complaint arrives joined into one `detail`, so reading the
+    // whole string answered "all missing?" with yes for any failure that
+    // included one missing field.
+    const mixed = fail(CHECK.schema, [
+      {
+        type: PROBLEM.schemaValidationFailed,
+        title: 'Schema Validation Failed',
+        detail:
+          "Schema validation failed for https://purl.imsglobal.org/x.json: /a: must have required property 'id'; /issuer/name: must be string",
+      },
+    ]);
+    expect(schemaFinding(withSchema(mixed))).toEqual({ state: 'invalid', missingOnly: false });
+    expect(summarise(withSchema(mixed)).headline).toBe(
+      "This credential wasn't built the way it should have been",
+    );
+  });
+
+  it('does not report a registry lookup that failed as a confirmed absence', () => {
+    for (const broken of [
+      fail(CHECK.registeredIssuer, [
+        {
+          type: 'https://www.w3.org/TR/vc-data-model#REGISTRY_ERROR',
+          title: 'Registry Error',
+          detail: 'Registry lookup failed.',
+        },
+      ]),
+      skip(CHECK.registeredIssuer, 'No registries configured in verification context.'),
+    ]) {
+      const r = ok();
+      set(r, broken);
+      const out = summarise(r);
+      expect(out.severity).toBe('unchecked');
+      expect(out.detail).not.toContain("aren't in any registry");
+      const row = listChecks(r).find((c) => c.id === CHECK.registeredIssuer);
+      expect(row?.value).not.toContain('not in any registry we check');
+    }
+  });
+
+  it('keeps a registry name that contains a period intact', () => {
+    const r = ok();
+    set(r, pass(CHECK.registeredIssuer, 'Issuer found in registry: registry.example.edu'));
+    const row = listChecks(r).find((c) => c.id === CHECK.registeredIssuer);
+    expect(row?.value).toContain('registry.example.edu');
+  });
+
+  it('never says "0 of the registries" when it could not read the names', () => {
+    const r = ok();
+    set(
+      r,
+      fail(CHECK.registeredIssuer, [
+        {
+          type: PROBLEM.issuerNotRegistered,
+          title: 'Issuer Not Registered',
+          detail: 'Issuer did:key:z6Mkn was not found in any known DID registry.',
+        },
+        // Present, but with a sentence we cannot pull names out of.
+        { type: PROBLEM.registryUnchecked, title: 'Registry Unchecked', detail: 'some went unchecked' },
+      ]),
+    );
+    const out = summarise(r);
+    expect(out.code).toBe('registry_unreachable');
+    expect(out.detail).not.toContain('0 of the registries');
+  });
+});

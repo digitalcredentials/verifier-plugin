@@ -17,8 +17,9 @@ import {
   STATUS_LIST_PROBLEM_PREFIX,
   EXPIRED_MARKERS,
   TAMPERED_MARKERS,
-  REGISTRY_FOUND_MARKER,
-  REGISTRY_UNCHECKED_MARKER,
+  REGISTRY_FOUND,
+  REGISTRY_UNCHECKED,
+  STRUCTURAL_CONTEXT_DETAILS,
 } from './types.js';
 import type { Severity, VerificationResponse, CheckResult, ProblemDetail } from './types.js';
 
@@ -135,9 +136,16 @@ export const hasStatusList = (r: VerificationResponse): boolean => {
  */
 export const stoppedEarly = (r: VerificationResponse): boolean => {
   const checks = checksById(r);
-  return [CHECK.contextExists, CHECK.vcContext, CHECK.credentialId, CHECK.proofExists].some(
-    (id) => checks.get(id)?.outcome.status === 'failure',
-  );
+  return [
+    // Parsing runs before the core suite and is what a document that is not a
+    // credential at all fails. Leaving it out rendered `{"hello":"world"}` as
+    // a card with five breakdown rows and no caveat.
+    CHECK.envelope,
+    CHECK.contextExists,
+    CHECK.vcContext,
+    CHECK.credentialId,
+    CHECK.proofExists,
+  ].some((id) => checks.get(id)?.outcome.status === 'failure');
 };
 
 /**
@@ -156,14 +164,19 @@ const passed = (check: CheckResult | undefined): boolean =>
 const failed = (check: CheckResult | undefined): boolean =>
   check?.outcome.status === 'failure';
 
-/** Split a trailing "A, B, C" list into names. */
-const namesAfter = (text: string, marker: RegExp): string[] => {
-  const match = marker.exec(text);
-  if (!match) return [];
-  return text
-    .slice(match.index + match[0].length)
-    .split('.')[0]!
-    .split(',')
+/**
+ * Pull the "A, B" list out of one of the registry sentences.
+ *
+ * The library joins names with ", ", so a registry whose own name contains a
+ * comma cannot be recovered faithfully — another reason this wants to be data
+ * rather than prose. Splitting is deliberately on ", " rather than "," so at
+ * least "Acme Registry, Inc." degrades to two plausible names instead of a
+ * name and a fragment, and nothing but a sentence depends on the result.
+ */
+const namesIn = (text: string, marker: RegExp): string[] => {
+  const captured = marker.exec(text)?.[1];
+  return (captured ?? '')
+    .split(', ')
     .map((n) => n.trim())
     .filter((n) => n.length > 0);
 };
@@ -183,7 +196,7 @@ const namesAfter = (text: string, marker: RegExp): string[] => {
  */
 const registryNames = (check: CheckResult | undefined): string[] =>
   check?.outcome.status === 'success'
-    ? namesAfter(check.outcome.message, REGISTRY_FOUND_MARKER)
+    ? namesIn(check.outcome.message, REGISTRY_FOUND)
     : [];
 
 /**
@@ -199,10 +212,10 @@ const registryNames = (check: CheckResult | undefined): string[] =>
 const unreachableNames = (check: CheckResult | undefined): string[] => {
   if (check?.outcome.status === 'success') {
     // Appended to the success message after the matched registries.
-    return namesAfter(check.outcome.message, REGISTRY_UNCHECKED_MARKER);
+    return namesIn(check.outcome.message, REGISTRY_UNCHECKED);
   }
   const problem = problemsOf(check).find((p) => p.type === PROBLEM.registryUnchecked);
-  return problem ? namesAfter(problem.detail ?? '', REGISTRY_UNCHECKED_MARKER) : [];
+  return problem ? namesIn(problem.detail ?? '', REGISTRY_UNCHECKED) : [];
 };
 
 /**
@@ -224,7 +237,7 @@ const registryAnswered = (check: CheckResult | undefined): boolean =>
 const anyUnreachable = (check: CheckResult | undefined): boolean =>
   hasProblem(check, PROBLEM.registryUnchecked) ||
   (check?.outcome.status === 'success' &&
-    REGISTRY_UNCHECKED_MARKER.test(check.outcome.message));
+    REGISTRY_UNCHECKED.test(check.outcome.message));
 
 /**
  * The issuer has actually withdrawn this.
@@ -304,10 +317,19 @@ export const schemaFinding = (r: VerificationResponse): SchemaFinding => {
   // problem's prose. Reading it is safe in a way the expiry marker is not:
   // getting this wrong picks the more general of two wordings, and cannot
   // produce a claim about the credential that is untrue.
-  const validation = problems.filter((p) => p.type === PROBLEM.schemaValidationFailed);
+  // The check joins every Ajv complaint into one `detail` with "; ", after a
+  // preamble naming the schema. So "are they all missing fields" is a question
+  // about the clauses, not about the problems — reading the whole string at
+  // once answered "yes" for any failure that included one missing field.
+  const clauses = problems
+    .filter((p) => p.type === PROBLEM.schemaValidationFailed)
+    .flatMap((p) => (p.detail ?? '').split(': ').slice(1).join(': ').split('; '))
+    .map((c) => c.trim())
+    .filter((c) => c.length > 0);
   return {
     state: 'invalid',
-    missingOnly: validation.every((p) => (p.detail ?? '').includes('must have required property')),
+    missingOnly:
+      clauses.length > 0 && clauses.every((c) => c.includes('must have required property')),
   };
 };
 
@@ -411,7 +433,19 @@ export const issuerMarker = (source: IssuerNameSource): string | undefined => {
  * exactly what is in question, so the finding is the point. A deliberate
  * exception, and only for this case.
  */
-export const verdictLeads = (r: VerificationResponse): boolean => stoppedEarly(r);
+export const verdictLeads = (r: VerificationResponse): boolean => contentUnconfirmed(r);
+
+/**
+ * Nothing shown was confirmed.
+ *
+ * True when verification could not start, and also when the signature check
+ * did not pass — a credential whose proof does not verify has content nobody
+ * has vouched for, whatever else reported. 1.x reached this through the
+ * fatal path; 2.x keeps running the other suites, so a tampered credential
+ * would otherwise render with a green issuer row and no caveat at all.
+ */
+const contentUnconfirmed = (r: VerificationResponse): boolean =>
+  stoppedEarly(r) || !passed(checksById(r).get(CHECK.signature));
 
 /**
  * One caveat for the whole of the displayed content.
@@ -422,7 +456,9 @@ export const verdictLeads = (r: VerificationResponse): boolean => stoppedEarly(r
  * field would claim knowledge we do not have.
  */
 export const contentCaveat = (r: VerificationResponse): string | undefined =>
-  stoppedEarly(r) ? "These details are what the file says. We can't confirm any of them." : undefined;
+  contentUnconfirmed(r)
+    ? "These details are what the file says. We can't confirm any of them."
+    : undefined;
 
 // ---------------------------------------------------------------------------
 // Tier A — it stopped
@@ -445,7 +481,17 @@ const isJsonLdError = (text: string): boolean =>
  * never work, for a failure retrying will never change.
  */
 const anyJsonLdError = (check: CheckResult | undefined): boolean =>
-  problemsOf(check).some((p) => isJsonLdError(`${p.title} ${p.detail ?? ''}`));
+  problemsOf(check).some(
+    (p) =>
+      isJsonLdError(`${p.title} ${p.detail ?? ''}`) &&
+      // `context-check` titles all three of its structural failures "Invalid
+      // JSON-LD", so the title alone cannot tell a missing `@context` apart
+      // from vocabulary the processor could not read. Only the latter is
+      // unreadable_vocabulary, and only it gets "ask for a replacement" —
+      // advice that would be useless for the others and wrong for a file
+      // that simply is not a credential.
+      !STRUCTURAL_CONTEXT_DETAILS.some((d) => (p.detail ?? '').includes(d)),
+  );
 
 const FATAL: Record<string, Omit<Outcome, 'code'>> = {
   unreadable_vocabulary: {
@@ -585,7 +631,14 @@ const isPastEndDate = (r: VerificationResponse): boolean => {
  */
 const isExpired = (r: VerificationResponse, checks: Map<string, CheckResult>): boolean => {
   const signature = checks.get(CHECK.signature);
-  return isPastEndDate(r) || (failed(signature) && detailMatches(signature, EXPIRED_MARKERS));
+  // The library said the date is why it stopped. That is an expiry we can
+  // report whatever else is true.
+  if (failed(signature) && detailMatches(signature, EXPIRED_MARKERS)) return true;
+  // Otherwise the end date is only worth asserting when the signature
+  // verified — an unverified `validUntil` is a number in a file nobody has
+  // vouched for, and "Expired on 9 January 2026" states it as fact. When the
+  // signature failed for some other reason we say we could not check instead.
+  return passed(signature) && isPastEndDate(r);
 };
 
 const expiryDate = (r: VerificationResponse): string | undefined => {
@@ -748,9 +801,18 @@ export const summarise = (r: VerificationResponse): Outcome => {
   // reach, both in the same sentence. Then we do know who issued this, and
   // saying we could not confirm it would contradict the issuer row, which
   // reads "found in ...".
-  if (issuer.registriesUnreachable && !passed(checks.get(CHECK.registeredIssuer))) {
-    const which =
-      issuer.unreachable.length === 1
+  // `unknown` covers a lookup that threw or never ran. Letting it fall
+  // through to `issuer_unconfirmed` stated a negative we never tested —
+  // "they aren't in any registry we check" — which is the §5 mistake.
+  if (
+    (issuer.registriesUnreachable || issuer.source === 'unknown') &&
+    !passed(checks.get(CHECK.registeredIssuer))
+  ) {
+    const which = !issuer.registriesUnreachable
+      ? "The registry check didn't complete."
+      : issuer.unreachable.length === 0
+        ? "A registry we check didn't load."
+        : issuer.unreachable.length === 1
         ? `The ${issuer.unreachable[0]} didn't load.`
         : `${issuer.unreachable.length} of the registries we check didn't load.`;
     return {
@@ -840,6 +902,8 @@ export const listChecks = (r: VerificationResponse): Check[] => {
         ? `${issuer.name}, found in ${issuer.registries[0] ?? 'a registry we check'}`
         : issuer.registriesUnreachable
           ? `${issuer.name} — registry unreachable, so we don't know`
+          : issuer.source === 'unknown'
+            ? `${issuer.name} — the registry check didn't complete, so we don't know`
           : issuer.source === 'none'
             ? 'no name given, only an identifier'
             : `${issuer.name} — name comes from the credential; not in any registry we check`,
