@@ -140,30 +140,44 @@ export const STATUS_LIST_PROBLEM_PREFIX =
   'https://www.w3.org/TR/vc-data-model#STATUS_LIST_';
 
 /**
- * PROVISIONAL, and the only place in this codebase that reads problem prose.
+ * Markers in problem prose. Corroborating signals only — never the sole basis
+ * for what we tell someone.
  *
  * verifier-core 2.x has no expiration check. An expired credential fails the
- * *signature* check, with the same problem type and title as a credential that
- * was altered after issue — `INVALID_SIGNATURE` / "Invalid Signature". The
- * only thing separating "your qualification ran out in January" from "someone
- * changed this" is the sentence in `detail`.
+ * *signature* check carrying the same problem type and title as one altered
+ * after issue — `INVALID_SIGNATURE` / "Invalid Signature" — so the two are
+ * separated only by the sentence in `detail`.
  *
- * Telling someone their credential was tampered with when it merely expired is
- * the worst wrong answer this component can give, so we match the sentence.
+ * Rather than trust that sentence, `summarise()` confirms expiry against the
+ * credential's own `validUntil` / `expirationDate`, which we hold and can
+ * check ourselves. The marker below is a second route to the same conclusion,
+ * kept because it also covers a credential whose date we failed to parse.
  *
- * Two things make that safe enough to ship:
+ * Tampering is matched on its own marker and never inherited by default, so a
+ * wording change upstream sends an unattributable signature failure to "we
+ * couldn't finish checking this" rather than to an accusation.
  *
- * - the fallback is `unchecked`, not `invalid_signature`. If these strings
- *   stop matching, an expired credential degrades to "we couldn't finish
- *   checking this" — honest — rather than to an accusation. Tampering is
- *   matched on its own marker rather than inherited by default.
- * - `test/expiry-marker.test.ts` runs the real library over the real expired
- *   fixture and fails if the wording moves, so the breakage is loud.
+ * `test/expiry.test.ts` pins both against the real library and the real
+ * fixtures, so a change in wording fails loudly instead of silently.
  *
- * Remove all of this the moment verifier-core carries a distinct problem type.
- * Raised on verifier-core#32.
+ * Remove when verifier-core carries a distinct problem type. Raised on
+ * verifier-core#32.
  */
-export const EXPIRED_MARKERS = ['is after "validUntil"'] as const;
-export const NOT_YET_VALID_MARKERS = ['is before "validFrom"'] as const;
+export const EXPIRED_MARKERS = ['is after "validUntil"', 'has expired'] as const;
 /** What the library says when the signature itself did not verify. */
 export const TAMPERED_MARKERS = ['Verification error'] as const;
+
+/**
+ * How the registry check reports what it found — in prose, on both paths.
+ *
+ * Success: `Issuer found in registry: A`, or `Issuer found in 2 registries:
+ * A, B`, optionally followed by `. 1 registries could not be checked: C`.
+ * Failure: an ISSUER_NOT_REGISTERED problem, plus a REGISTRY_UNCHECKED one
+ * carrying the same "could not be checked" sentence.
+ *
+ * None of it arrives as data — the success outcome has no payload at all —
+ * so rendering §5 means reading these sentences. Raised on verifier-core#32;
+ * `RegistryLookupResult` on the payload would retire all of this.
+ */
+export const REGISTRY_FOUND_MARKER = /Issuer found in (?:\d+ )?registr(?:y|ies): /;
+export const REGISTRY_UNCHECKED_MARKER = /\d+ registries could not be checked: /;

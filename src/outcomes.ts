@@ -17,6 +17,8 @@ import {
   STATUS_LIST_PROBLEM_PREFIX,
   EXPIRED_MARKERS,
   TAMPERED_MARKERS,
+  REGISTRY_FOUND_MARKER,
+  REGISTRY_UNCHECKED_MARKER,
 } from './types.js';
 import type { Severity, VerificationResponse, CheckResult, ProblemDetail } from './types.js';
 
@@ -78,9 +80,11 @@ export interface IssuerIdentity {
 const checksById = (r: VerificationResponse): Map<string, CheckResult> => {
   const map = new Map<string, CheckResult>();
   for (const check of r.results ?? []) {
-    // `id` is optional in the library's declarations, so the deprecated pair
-    // is still the fallback rather than defensive padding.
-    map.set(check.id ?? `${check.suite}.${check.check}`, check);
+    // The library always computes `id` after running the suites, so the
+    // fallback only keeps a hand-built literal from vanishing. It cannot match
+    // a CHECK constant: those carry the phase, which `suite` and `check` do
+    // not, so there is nothing to reconstruct it from.
+    map.set(check.id ?? check.check, check);
   }
   return map;
 };
@@ -152,16 +156,35 @@ const passed = (check: CheckResult | undefined): boolean =>
 const failed = (check: CheckResult | undefined): boolean =>
   check?.outcome.status === 'failure';
 
+/** Split a trailing "A, B, C" list into names. */
+const namesAfter = (text: string, marker: RegExp): string[] => {
+  const match = marker.exec(text);
+  if (!match) return [];
+  return text
+    .slice(match.index + match[0].length)
+    .split('.')[0]!
+    .split(',')
+    .map((n) => n.trim())
+    .filter((n) => n.length > 0);
+};
+
 /**
  * Which registries recognised the issuer.
  *
- * 2.x tells us that one did, and not which: a successful registry check
- * carries no payload, so `matchingRegistries` never reaches us. The callers
- * already have a fallback phrase for this, and it is the honest one — we
- * really do only know that some registry we check listed them. Raised on
- * verifier-core#32; restore this the moment the payload appears.
+ * 2.x carries no payload on a successful registry check, but the names are in
+ * the message — `Issuer found in registry: A`, or `Issuer found in 2
+ * registries: A, B`. Parsing prose is not how this should arrive and it is
+ * raised on verifier-core#32, but the information is real and §5 is built on
+ * it, so we read it rather than pretend it is gone.
+ *
+ * Failing to parse costs a name in a sentence: the callers fall back to "a
+ * registry we check", which is still true. Nothing about the verdict rests on
+ * it — that rests on the check having passed.
  */
-const registryNames = (_check: CheckResult | undefined): string[] => [];
+const registryNames = (check: CheckResult | undefined): string[] =>
+  check?.outcome.status === 'success'
+    ? namesAfter(check.outcome.message, REGISTRY_FOUND_MARKER)
+    : [];
 
 /**
  * Which registries we could not reach.
@@ -174,13 +197,12 @@ const registryNames = (_check: CheckResult | undefined): string[] => [];
  * prose, and so survives a wording change.
  */
 const unreachableNames = (check: CheckResult | undefined): string[] => {
+  if (check?.outcome.status === 'success') {
+    // Appended to the success message after the matched registries.
+    return namesAfter(check.outcome.message, REGISTRY_UNCHECKED_MARKER);
+  }
   const problem = problemsOf(check).find((p) => p.type === PROBLEM.registryUnchecked);
-  if (!problem) return [];
-  const listed = (problem.detail ?? '').split(': ')[1];
-  return (listed ?? '')
-    .split(',')
-    .map((n) => n.trim())
-    .filter((n) => n.length > 0);
+  return problem ? namesAfter(problem.detail ?? '', REGISTRY_UNCHECKED_MARKER) : [];
 };
 
 /**
@@ -188,8 +210,21 @@ const unreachableNames = (check: CheckResult | undefined): string[] => {
  * its name. This is the load-bearing half: it decides whether we say "we don't
  * know" or "they aren't listed", and it rests on the problem type alone.
  */
+/**
+ * The registry check reached a verdict on this issuer.
+ *
+ * A lookup that threw (REGISTRY_ERROR) or never ran — no registries
+ * configured, no lookup available — establishes nothing. Reading either as
+ * "not in any registry we check" states a negative we never tested, which is
+ * the §5 mistake this file exists to avoid.
+ */
+const registryAnswered = (check: CheckResult | undefined): boolean =>
+  check?.outcome.status === 'success' || hasProblem(check, PROBLEM.issuerNotRegistered);
+
 const anyUnreachable = (check: CheckResult | undefined): boolean =>
-  hasProblem(check, PROBLEM.registryUnchecked);
+  hasProblem(check, PROBLEM.registryUnchecked) ||
+  (check?.outcome.status === 'success' &&
+    REGISTRY_UNCHECKED_MARKER.test(check.outcome.message));
 
 /**
  * The issuer has actually withdrawn this.
@@ -231,10 +266,11 @@ export type SchemaFinding =
   | { state: 'unavailable' };
 
 /**
- * verifier-core runs this on every verification and files it under
- * `additionalInformation`, not `log` — so it never reaches `verified`, and a
- * credential can be reported as verified while failing its own schema.
- * Reading only the log throws this away silently.
+ * The schema check is a real check in 2.x, but it is neither fatal nor in the
+ * default suites — verify.ts adds it back. So a credential can still be
+ * reported as `verified` while failing its own schema, exactly as in 1.x
+ * where the result was filed outside the log entirely. Either way, reading
+ * only what bears on authenticity throws this away silently.
  */
 export const schemaFinding = (r: VerificationResponse): SchemaFinding => {
   const check = checksById(r).get(CHECK.schema);
@@ -245,9 +281,11 @@ export const schemaFinding = (r: VerificationResponse): SchemaFinding => {
   if (!check) return { state: 'no_schema' };
 
   if (check.outcome.status === 'skipped') {
-    // The credential declared nothing to validate against, as opposed to
-    // declaring something we then could not load.
-    return /no .*schema|not .*applicable|no credentialSchema/i.test(check.outcome.reason)
+    // The two reasons the check actually emits. "Does not appear to be an OBv3
+    // credential" means nothing declared a standard we know how to check
+    // against — nothing failed and there was nothing to try. Anything else
+    // means the check could not be carried out, which establishes nothing.
+    return /does not appear to be an OBv3/i.test(check.outcome.reason)
       ? { state: 'no_schema' }
       : { state: 'unavailable' };
   }
@@ -316,7 +354,7 @@ export const issuerIdentity = (r: VerificationResponse): IssuerIdentity => {
   // A registry we could not reach means we do not know, rather than "no".
   const source: IssuerNameSource = nothingEstablished
     ? 'unverifiable'
-    : registriesUnreachable
+    : registriesUnreachable || !registryAnswered(step)
       ? 'unknown'
       : 'credential';
   if (claimedName)
@@ -326,7 +364,11 @@ export const issuerIdentity = (r: VerificationResponse): IssuerIdentity => {
   // "unconfirmed" while the verdict says we simply don't know.
   return {
     name: id ?? 'Unknown issuer',
-    source: nothingEstablished ? 'unverifiable' : registriesUnreachable ? 'unknown' : 'none',
+    source: nothingEstablished
+      ? 'unverifiable'
+      : registriesUnreachable || !registryAnswered(step)
+        ? 'unknown'
+        : 'none',
     registries,
     unreachable,
     registriesUnreachable,
@@ -393,7 +435,8 @@ export const contentCaveat = (r: VerificationResponse): string | undefined =>
  * change that — so they get their own outcome rather than falling through to
  * "something went wrong, try again".
  */
-const isJsonLdError = (name: string): boolean => name.toLowerCase().includes('jsonld');
+const isJsonLdError = (text: string): boolean =>
+  /json-?ld/i.test(text);
 
 /**
  * verifier-core reaches its json-ld branch by finding such an error anywhere
@@ -445,6 +488,15 @@ const FATAL: Record<string, Omit<Outcome, 'code'>> = {
   },
   // The two below mean we could not find out — not that anything is wrong.
   // Conflating them with invalid_signature is the worst mistake available.
+  //
+  // Both are currently UNREACHABLE against verifier-core 2.x, which reports a
+  // transport failure and an unresolvable did:web as the same
+  // PROOF_VERIFICATION_ERROR as everything else the proof suite cannot
+  // complete. They fall to `signature_unchecked`, whose wording is the more
+  // general version of the same thing, so nothing false is shown — only
+  // something less specific. Kept, with their wording, for when upstream
+  // distinguishes them; we have no did:web fixture to exercise either path
+  // regardless.
   http_error_with_signature_check: {
     severity: 'unchecked',
     headline: "We couldn't finish checking this",
@@ -504,6 +556,38 @@ const reassurance = (
     : ' Nothing has changed since it was issued.';
 };
 
+/**
+ * The credential's own end date, as a Date. Ours to read, and the reason we do
+ * not have to take the library's prose on trust when deciding expiry.
+ */
+const expiryOf = (r: VerificationResponse): Date | undefined => {
+  const raw = r.verifiableCredential?.['validUntil'] ?? r.verifiableCredential?.['expirationDate'];
+  if (typeof raw !== 'string') return undefined;
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+};
+
+/** Past its end date, established from the credential rather than from prose. */
+const isPastEndDate = (r: VerificationResponse): boolean => {
+  const end = expiryOf(r);
+  return end !== undefined && end.getTime() < Date.now();
+};
+
+/**
+ * Whether this credential has run out.
+ *
+ * Defined once and read by both `summarise()` and `listChecks()`. Two copies
+ * of this rule is exactly how a headline and a breakdown drift apart, and the
+ * consistency suite caught them doing so the first time it ran against 2.x.
+ *
+ * The credential's own end date leads, because it is ours to check. The
+ * library's prose is a second route for a date we could not parse.
+ */
+const isExpired = (r: VerificationResponse, checks: Map<string, CheckResult>): boolean => {
+  const signature = checks.get(CHECK.signature);
+  return isPastEndDate(r) || (failed(signature) && detailMatches(signature, EXPIRED_MARKERS));
+};
+
 const expiryDate = (r: VerificationResponse): string | undefined => {
   const raw = r.verifiableCredential?.['validUntil'] ?? r.verifiableCredential?.['expirationDate'];
   if (typeof raw !== 'string') return undefined;
@@ -555,38 +639,20 @@ export const summarise = (r: VerificationResponse): Outcome => {
   const revocation = checks.get(CHECK.status);
   const issuer = issuerIdentity(r);
 
-  if (failed(signature)) {
-    // 2.x has no expiration check. An expired credential and one altered after
-    // issue both fail *this* check with the same problem type and the same
-    // title, and the only thing telling them apart is the prose. See
-    // EXPIRED_MARKERS in types.ts for why we read it and what protects us.
-    //
-    // Order matters, and so does the fallback. Tampering is matched on its own
-    // marker rather than inherited by default, so a wording change upstream
-    // sends both cases to "we couldn't finish checking this" — which is merely
-    // unhelpful — instead of telling someone whose credential simply ran out
-    // that it has been altered, which would be a false accusation.
-    if (detailMatches(signature, EXPIRED_MARKERS)) {
-      // Name the date. How stale it is changes what someone does about it, and
-      // "eight months ago" is vaguer than a date when a qualification is at
-      // stake. §4's relative times are about when *we* checked, not this.
-      const on = expiryDate(r);
-      return {
-        severity: 'warning',
-        code: 'expired',
-        headline: on ? `Expired on ${on}` : 'This has passed its end date',
-        detail: `Its dates have run out.${reassurance(r, checks)}`,
-        action: `Ask ${issuer.name} whether it can be renewed.`,
-      };
-    }
-    if (detailMatches(signature, TAMPERED_MARKERS)) {
-      return { code: 'invalid_signature', ...FATAL['invalid_signature']! };
-    }
-    // A signature failure we cannot attribute. A credential that is not yet
-    // valid lands here too. Saying which would be a guess, and the guess that
-    // matters is the one we refuse to make.
-    return { code: 'signature_unchecked', ...UNCHECKED_SIGNATURE };
+  // 2.x has no expiration check: an expired credential and one altered after
+  // issue both fail the *signature* check with the same problem type and the
+  // same title. Prose is the only thing the library offers to tell them apart,
+  // so expiry is established from the credential's own end date — which we
+  // hold — with the marker as a second route for a date we could not parse.
+  const signatureFailed = failed(signature);
+  const tampered = signatureFailed && detailMatches(signature, TAMPERED_MARKERS);
+  const expired = isExpired(r, checks);
+
+  // Nothing below describes a credential that was altered, so this leads.
+  if (tampered) {
+    return { code: 'invalid_signature', ...FATAL['invalid_signature']! };
   }
+
 
   if (isWithdrawn(revocation)) {
     return {
@@ -597,6 +663,28 @@ export const summarise = (r: VerificationResponse): Outcome => {
       action: `A new copy must be obtained from ${issuer.name}.`,
     };
   }
+
+  // Expiry sits below withdrawal deliberately. A credential that was withdrawn
+  // *and* has since run out is withdrawn: the issuer has already decided, and
+  // "ask whether it can be renewed" would bury that behind a lesser finding.
+  if (expired) {
+    // Name the date. How stale it is changes what someone does about it, and
+    // "eight months ago" is vaguer than a date when a qualification is at
+    // stake. §4's relative times are about when *we* checked, not this.
+    const on = expiryDate(r);
+    return {
+      severity: 'warning',
+      code: 'expired',
+      headline: on ? `Expired on ${on}` : 'This has passed its end date',
+      // Usually empty, because the signature check is what failed on the date
+      // and so has not reported. It is assembled rather than written out so
+      // that it appears when the checks behind it did pass, and stays absent
+      // when they did not.
+      detail: `Its dates have run out.${reassurance(r, checks)}`,
+      action: `Ask ${issuer.name} whether it can be renewed.`,
+    };
+  }
+
 
   // A credential can be genuine, current, and not withdrawn, and still have
   // been built wrong. That is a finding rather than an unknown, so it leads
@@ -655,11 +743,11 @@ export const summarise = (r: VerificationResponse): Outcome => {
   }
 
   // An unreachable registry only leaves us in doubt if nothing else answered.
-  // verifier-core sets `valid` from whether any registry matched and attaches
-  // `uncheckedRegistries` independently, so with more than one registry both
-  // can be true at once — and then we do know who issued this. Saying we
-  // could not confirm it would contradict the issuer row, which reads
-  // "found in ...".
+  // A match and an unreachable registry are not mutually exclusive: with more
+  // than one registry the check passes and still reports the one it could not
+  // reach, both in the same sentence. Then we do know who issued this, and
+  // saying we could not confirm it would contradict the issuer row, which
+  // reads "found in ...".
   if (issuer.registriesUnreachable && !passed(checks.get(CHECK.registeredIssuer))) {
     const which =
       issuer.unreachable.length === 1
@@ -789,13 +877,13 @@ export const listChecks = (r: VerificationResponse): Check[] => {
   // expired credential shows up as that check failing with expiry in its
   // prose. Reading the row off the same check as the verdict is also what
   // keeps the two from disagreeing.
-  const isExpired = failed(signature) && detailMatches(signature, EXPIRED_MARKERS);
+  const expiredNow = isExpired(r, checks);
   const expired = expiryDate(r);
   rows.push({
     id: CHECK.signature + '#dates',
     label: 'Dates',
-    severity: isExpired ? 'warning' : passed(signature) ? 'success' : 'unchecked',
-    value: isExpired
+    severity: expiredNow ? 'warning' : passed(signature) ? 'success' : 'unchecked',
+    value: expiredNow
       ? expired
         ? `expired on ${expired}`
         : 'expired'
