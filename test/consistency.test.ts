@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { summarise, listChecks, stoppedEarly, hasStatusList } from '../src/outcomes.js';
-import type { VerificationResponse, VerificationStep } from '../src/types.js';
+import { CHECK, PROBLEM, STATUS_LIST_PROBLEM_PREFIX } from '../src/types.js';
+import type { VerificationResponse, CheckResult } from '../src/types.js';
 
 /**
  * The headline and the breakdown must never contradict each other.
@@ -15,125 +16,285 @@ import type { VerificationResponse, VerificationStep } from '../src/types.js';
  * So rather than test the instances, this walks every combination of check
  * results and asserts the two can never disagree — including after both of us
  * have stopped looking at this code.
+ *
+ * Ported to verifier-core 2.x. The review of that migration found this file
+ * switched off and the port not done, and four of its twelve findings were
+ * contradictions this would have caught — most sharply a `warning` "Expired"
+ * headline above an `error` row reading "withdrawn by the issuer".
  */
 
-type Sig = 'passed' | 'failed' | 'missing';
-// `unreadable` is the case the first four missed: the credential says it can
-// be withdrawn, and verifier-core left no revocation step in the log at all,
-// which is what it does with a `credentialStatus` type it does not
-// recognise. `none` cannot express it — that removes the credentialStatus
-// and the step together, so the pair always agreed.
-type Rev = 'passed' | 'failed' | 'errored' | 'none' | 'unreadable';
-type Exp = 'passed' | 'failed' | 'missing';
-// `matched+unreachable` is the combination the first three missed: one
-// registry recognised the issuer while another could not be reached. Both
-// fields are set independently by verifier-core, so it is reachable with any
-// two registries — and it hid a contradiction for two code reviews.
-type Iss = 'matched' | 'unlisted' | 'unreachable' | 'matched+unreachable';
-type Sch = 'valid' | 'invalid' | 'none' | 'unavailable';
+/**
+ * 2.x has no expiration check: expiry arrives as a *signature* failure
+ * carrying the same problem type and title as tampering. So the signature
+ * dimension now covers the ways that one check can fail, and the credential's
+ * own end date is a dimension of its own — `summarise()` reads the date
+ * rather than trusting the prose, and both have to agree with the rows.
+ */
+type Sig = 'passed' | 'tampered' | 'expired' | 'unattributable' | 'missing';
+/** `unreadable`: a status type the library does not recognise, so it skips. */
+type Rev = 'passed' | 'revoked' | 'list_error' | 'none' | 'unreadable';
+type End = 'in_date' | 'past';
+/**
+ * `errored` and `skipped` are the cases the 2.x migration got wrong: a lookup
+ * that threw, or never ran, is not a confirmed "not in any registry".
+ */
+type Iss = 'matched' | 'unlisted' | 'unreachable' | 'matched+unreachable' | 'errored' | 'skipped';
+type Sch = 'valid' | 'invalid' | 'no_schema' | 'unavailable' | 'missing';
 
-const SIGNATURES: Sig[] = ['passed', 'failed', 'missing'];
-const REVOCATIONS: Rev[] = ['passed', 'failed', 'errored', 'none', 'unreadable'];
-const EXPIRATIONS: Exp[] = ['passed', 'failed', 'missing'];
-const ISSUERS: Iss[] = ['matched', 'unlisted', 'unreachable', 'matched+unreachable'];
-const SCHEMAS: Sch[] = ['valid', 'invalid', 'none', 'unavailable'];
+const SIGNATURES: Sig[] = ['passed', 'tampered', 'expired', 'unattributable', 'missing'];
+const REVOCATIONS: Rev[] = ['passed', 'revoked', 'list_error', 'none', 'unreadable'];
+const ENDS: End[] = ['in_date', 'past'];
+const ISSUERS: Iss[] = [
+  'matched',
+  'unlisted',
+  'unreachable',
+  'matched+unreachable',
+  'errored',
+  'skipped',
+];
+const SCHEMAS: Sch[] = ['valid', 'invalid', 'no_schema', 'unavailable', 'missing'];
 
-/** What verifier-core files under `additionalInformation`, per state. */
-const schemaEntry = (sch: Sch) => {
-  const schema = 'https://purl.imsglobal.org/spec/ob/v3p0/schema/json/x.json';
-  const source = 'Assumed based on vc.type';
-  switch (sch) {
-    case 'valid':
-      return { id: 'schema_check', results: [{ schema, result: { valid: true }, source }] };
-    case 'invalid':
-      return {
-        id: 'schema_check',
-        results: [
-          {
-            schema,
-            result: {
-              valid: false,
-              errors: [{ keyword: 'required', message: "must have required property 'validFrom'" }],
+const check = (id: string, outcome: CheckResult['outcome'], fatal = false): CheckResult => ({
+  id,
+  // The deprecated pair, carried so the shape matches what the library emits.
+  check: id.split('.').slice(-1)[0]!,
+  suite: id.split('.').slice(1, 2)[0]!,
+  outcome,
+  fatal,
+});
+
+const PAST = '2026-01-09T10:00:00Z';
+const FUTURE = '2099-01-09T10:00:00Z';
+
+const signatureCheck = (sig: Sig): CheckResult | undefined => {
+  switch (sig) {
+    case 'missing':
+      return undefined;
+    case 'passed':
+      return check(CHECK.signature, { status: 'success', message: 'Signature verified.' }, true);
+    case 'tampered':
+      return check(
+        CHECK.signature,
+        {
+          status: 'failure',
+          problems: [
+            {
+              type: PROBLEM.invalidSignature,
+              title: 'Invalid Signature',
+              detail: 'Verification error(s).',
             },
-            source,
-          },
-        ],
-      };
-    // Both of these arrive as a bare string, not a list. See types.ts.
-    case 'none':
-      return { id: 'schema_check', results: 'NO_SCHEMA' };
-    case 'unavailable':
-      return { id: 'schema_check', results: 'INVALID_SCHEMA - possibly not a valid url' };
+          ],
+        },
+        true,
+      );
+    case 'expired':
+      return check(
+        CHECK.signature,
+        {
+          status: 'failure',
+          problems: [
+            {
+              type: PROBLEM.invalidSignature,
+              title: 'Invalid Signature',
+              // Same type and title as tampering. Only this sentence differs.
+              detail: `The current date time (2026-09-23T00:00:00Z) is after "validUntil" (${PAST}).`,
+            },
+          ],
+        },
+        true,
+      );
+    case 'unattributable':
+      return check(
+        CHECK.signature,
+        {
+          status: 'failure',
+          problems: [
+            {
+              type: PROBLEM.proofVerification,
+              title: 'No Applicable Crypto Service',
+              detail: 'No registered crypto service can verify this subject.',
+            },
+          ],
+        },
+        true,
+      );
   }
 };
 
-const build = (sig: Sig, rev: Rev, exp: Exp, iss: Iss, sch: Sch): VerificationResponse => {
-  const log: VerificationStep[] = [];
-
-  if (sig !== 'missing') log.push({ id: 'valid_signature', valid: sig === 'passed' });
-  if (exp !== 'missing') log.push({ id: 'expiration', valid: exp === 'passed' });
-
-  if (rev === 'passed' || rev === 'failed') {
-    log.push({ id: 'revocation_status', valid: rev === 'passed' });
-  } else if (rev === 'errored') {
-    log.push({ id: 'revocation_status', error: { name: 'status_list_not_found', message: 'x' } });
-  }
-
-  const didMatch = iss === 'matched' || iss === 'matched+unreachable';
-  log.push({
-    id: 'registered_issuer',
-    // verifier-core sets this from whether any registry matched, and attaches
-    // uncheckedRegistries separately. They are not mutually exclusive.
-    valid: didMatch,
-    matchingIssuers: didMatch
-      ? [
+const revocationCheck = (rev: Rev): CheckResult | undefined => {
+  switch (rev) {
+    case 'none':
+      return check(CHECK.status, {
+        status: 'skipped',
+        reason: 'Credential has no credentialStatus.',
+      });
+    case 'unreadable':
+      return check(CHECK.status, {
+        status: 'skipped',
+        reason: 'Status type "StatusList2021Entry" is not BitstringStatusListEntry.',
+      });
+    case 'passed':
+      return check(CHECK.status, {
+        status: 'success',
+        message: 'Credential status is valid (not revoked or suspended).',
+      });
+    case 'revoked':
+      return check(CHECK.status, {
+        status: 'failure',
+        problems: [
           {
-            issuer: { federation_entity: { organization_name: 'Springfield College' } },
-            registry: { federation_entity: { organization_name: 'DCC Registry' } },
+            type: PROBLEM.revoked,
+            title: 'Credential Revoked or Suspended',
+            detail: 'The credential has been revoked.',
           },
-        ]
-      : [],
-    uncheckedRegistries:
-      iss === 'unreachable' || iss === 'matched+unreachable'
-        ? [{ name: 'Second Registry' }]
-        : [],
-  });
+        ],
+      });
+    case 'list_error':
+      return check(CHECK.status, {
+        status: 'failure',
+        problems: [
+          {
+            type: `${STATUS_LIST_PROBLEM_PREFIX}NOT_FOUND`,
+            title: 'Status List Not Found',
+            detail: 'The status list could not be fetched.',
+          },
+        ],
+      });
+  }
+};
+
+const registryCheck = (iss: Iss): CheckResult | undefined => {
+  const unchecked = '1 registries could not be checked: Second Registry';
+  switch (iss) {
+    case 'skipped':
+      return check(CHECK.registeredIssuer, {
+        status: 'skipped',
+        reason: 'No registries configured in verification context.',
+      });
+    case 'matched':
+      return check(CHECK.registeredIssuer, {
+        status: 'success',
+        message: 'Issuer found in registry: DCC Registry',
+      });
+    case 'matched+unreachable':
+      return check(CHECK.registeredIssuer, {
+        status: 'success',
+        message: `Issuer found in registry: DCC Registry. ${unchecked}`,
+      });
+    case 'unlisted':
+      return check(CHECK.registeredIssuer, {
+        status: 'failure',
+        problems: [
+          {
+            type: PROBLEM.issuerNotRegistered,
+            title: 'Issuer Not Registered',
+            detail: 'Issuer did:key:z6Mkn was not found in any known DID registry.',
+          },
+        ],
+      });
+    case 'unreachable':
+      return check(CHECK.registeredIssuer, {
+        status: 'failure',
+        problems: [
+          {
+            type: PROBLEM.issuerNotRegistered,
+            title: 'Issuer Not Registered',
+            detail: 'Issuer did:key:z6Mkn was not found in any known DID registry.',
+          },
+          { type: PROBLEM.registryUnchecked, title: 'Registry Unchecked', detail: unchecked },
+        ],
+      });
+    case 'errored':
+      return check(CHECK.registeredIssuer, {
+        status: 'failure',
+        problems: [
+          {
+            type: 'https://www.w3.org/TR/vc-data-model#REGISTRY_ERROR',
+            title: 'Registry Error',
+            detail: 'Registry lookup failed.',
+          },
+        ],
+      });
+  }
+};
+
+const schemaCheck = (sch: Sch): CheckResult | undefined => {
+  switch (sch) {
+    case 'missing':
+      return undefined;
+    case 'valid':
+      return check(CHECK.schema, { status: 'success', message: 'Schema validation passed.' });
+    case 'invalid':
+      return check(CHECK.schema, {
+        status: 'failure',
+        problems: [
+          {
+            type: PROBLEM.schemaValidationFailed,
+            title: 'Schema Validation Failed',
+            detail:
+              "Schema validation failed for https://purl.imsglobal.org/x.json: /credentialSubject/achievement: must have required property 'id'",
+          },
+        ],
+      });
+    case 'no_schema':
+      return check(CHECK.schema, {
+        status: 'skipped',
+        reason:
+          'Credential does not appear to be an OBv3 credential (OpenBadgeCredential or EndorsementCredential).',
+      });
+    case 'unavailable':
+      return check(CHECK.schema, {
+        status: 'skipped',
+        reason: 'No verifiable credential found in subject.',
+      });
+  }
+};
+
+const build = (sig: Sig, rev: Rev, end: End, iss: Iss, sch: Sch): VerificationResponse => {
+  const results = [
+    // The four core checks pass throughout: a failure among them is
+    // "it stopped", which has its own describe block below.
+    check(CHECK.contextExists, { status: 'success', message: 'ok' }, true),
+    check(CHECK.vcContext, { status: 'success', message: 'ok' }, true),
+    check(CHECK.credentialId, { status: 'success', message: 'ok' }, true),
+    check(CHECK.proofExists, { status: 'success', message: 'ok' }, true),
+    signatureCheck(sig),
+    revocationCheck(rev),
+    registryCheck(iss),
+    schemaCheck(sch),
+  ].filter((c): c is CheckResult => c !== undefined);
 
   return {
-    credential: {
+    verified: results.every((c) => c.outcome.status !== 'failure'),
+    verifiableCredential: {
       issuer: { id: 'did:key:z6Mkn', name: 'Springfield College' },
+      validUntil: end === 'past' ? PAST : FUTURE,
       // "none" means the issuer never set up a way to withdraw it at all.
       ...(rev === 'none' ? {} : { credentialStatus: { type: 'BitstringStatusListEntry' } }),
     },
-    log,
-    additionalInformation: [schemaEntry(sch)],
+    results,
   };
 };
 
 const cases = SIGNATURES.flatMap((sig) =>
   REVOCATIONS.flatMap((rev) =>
-    EXPIRATIONS.flatMap((exp) =>
+    ENDS.flatMap((end) =>
       ISSUERS.flatMap((iss) =>
-        SCHEMAS.map((sch) => ({
-          sig,
-          rev,
-          exp,
-          iss,
-          sch,
-          name: `${sig}/${rev}/${exp}/${iss}/${sch}`,
-        })),
+        SCHEMAS.map((sch) => ({ sig, rev, end, iss, sch, name: `${sig}/${rev}/${end}/${iss}/${sch}` })),
       ),
     ),
   ),
 );
 
+const DATES_ROW = `${CHECK.signature}#dates`;
+
 describe(`the headline and the breakdown agree (${cases.length} combinations)`, () => {
-  it.each(cases)('$name', ({ sig, rev, exp, iss, sch }) => {
-    const r = build(sig, rev, exp, iss, sch);
+  it.each(cases)('$name', ({ sig, rev, end, iss, sch }) => {
+    const r = build(sig, rev, end, iss, sch);
     const out = summarise(r);
     const rows = listChecks(r);
     const row = (id: string) => rows.find((c) => c.id === id);
-    const where = `${sig}/${rev}/${exp}/${iss}/${sch} → ${out.code}`;
+    const where = `${sig}/${rev}/${end}/${iss}/${sch} → ${out.code}`;
 
     expect(rows.length, `${where}: verification ran, so there must be rows`).toBeGreaterThan(0);
 
@@ -145,13 +306,13 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
         // information while the verdict is still a pass. Both stay visible
         // for an issuer debugging their own badge, who otherwise cannot tell
         // "nothing to check against" apart from "checked and clean".
-        const noWithdrawalList = c.id === 'revocation_status' && !hasStatusList(r);
+        const noWithdrawalList = c.id === CHECK.status && !hasStatusList(r);
         // Unlike the signature, the schema check never establishes that the
         // credential is authentic — it only reports how it was assembled. Not
         // having one therefore does not undermine a pass the way an unchecked
         // signature would, and must not drag the headline down to "we
         // couldn't finish checking this".
-        const noSchemaToCheck = c.id === 'schema_check' && sch !== 'valid';
+        const noSchemaToCheck = c.id === CHECK.schema && sch !== 'valid';
         if (noWithdrawalList || noSchemaToCheck) {
           expect(c.severity, `${where}: "${c.label}" under a pass`).toBe('unchecked');
           continue;
@@ -190,29 +351,28 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
 
     if (/\bgenuine\b|hasn't been changed|has not been changed|nothing has changed/.test(claims)) {
       expect(
-        row('valid_signature')?.severity,
-        `${where}: claims the credential is unchanged, but the signature row says "${row('valid_signature')?.value}"`,
+        row(CHECK.signature)?.severity,
+        `${where}: claims the credential is unchanged, but the signature row says "${row(CHECK.signature)?.value}"`,
       ).toBe('success');
     }
 
     if (/hasn't been withdrawn|hasn't withdrawn it|not been withdrawn/.test(claims)) {
-      const rev = row('revocation_status')!;
+      const revRow = row(CHECK.status)!;
       expect(
-        rev.severity === 'success' || !hasStatusList(r),
-        `${where}: claims it was not withdrawn, but the row says "${rev.value}"`,
+        revRow.severity === 'success' || !hasStatusList(r),
+        `${where}: claims it was not withdrawn, but the row says "${revRow.value}"`,
       ).toBe(true);
     }
 
     // Each verdict must be borne out by the row it is about.
     const expectations: Record<string, [string, string] | undefined> = {
-      verified: ['valid_signature', 'success'],
-      invalid_signature: ['valid_signature', 'error'],
-      signature_unchecked: ['valid_signature', 'unchecked'],
-      expiry_unchecked: ['expiration', 'unchecked'],
-      withdrawn: ['revocation_status', 'error'],
-      withdrawal_unknown: ['revocation_status', 'unchecked'],
-      expired: ['expiration', 'warning'],
-      malformed: ['schema_check', 'warning'],
+      verified: [CHECK.signature, 'success'],
+      invalid_signature: [CHECK.signature, 'error'],
+      signature_unchecked: [CHECK.signature, 'unchecked'],
+      withdrawn: [CHECK.status, 'error'],
+      withdrawal_unknown: [CHECK.status, 'unchecked'],
+      expired: [DATES_ROW, 'warning'],
+      malformed: [CHECK.schema, 'warning'],
     };
     const expected = expectations[out.code];
     if (expected) {
@@ -222,7 +382,7 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
 
     // The issuer verdicts must never sit above a row claiming a registry match.
     if (out.code === 'issuer_unconfirmed' || out.code === 'registry_unreachable') {
-      expect(row('registered_issuer')?.severity, `${where}: issuer row`).not.toBe('success');
+      expect(row(CHECK.registeredIssuer)?.severity, `${where}: issuer row`).not.toBe('success');
     }
 
     // Every verdict that is not a pass names one thing to do, except the
@@ -234,23 +394,46 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
   });
 });
 
+describe('a credential that is both withdrawn and expired', () => {
+  // The contradiction the 2.x migration introduced and this file exists to
+  // catch: expiry moved ahead of withdrawal, so the headline was a warning
+  // about renewal while the breakdown reported an error.
+  it('reports the withdrawal, because the issuer has already decided', () => {
+    const r = build('expired', 'revoked', 'past', 'matched', 'valid');
+    const out = summarise(r);
+    expect(out.code).toBe('withdrawn');
+    expect(out.severity).toBe('error');
+    expect(out.action).toContain('new copy');
+  });
+});
+
 describe('verification that stopped early', () => {
-  const FATAL = [
-    'invalid_jsonld',
-    'no_vc_context',
-    'invalid_credential_id',
-    'no_proof',
-    'invalid_signature',
-    'http_error_with_signature_check',
-    'did_web_unresolved',
-    'unknown_error',
-    'jsonld.ValidationError',
+  // 2.x has no "it stopped" shape of its own — every suite runs and reports —
+  // so the equivalent is a failure among the four core checks.
+  const FATAL: Array<[string, string, string]> = [
+    [CHECK.contextExists, 'Invalid JSON-LD', 'unreadable_vocabulary'],
+    [CHECK.contextExists, 'Missing Context', 'invalid_jsonld'],
+    [CHECK.vcContext, 'Not a Verifiable Credential', 'no_vc_context'],
+    [CHECK.credentialId, 'Invalid Credential Id', 'invalid_credential_id'],
+    [CHECK.proofExists, 'No Proof', 'no_proof'],
   ];
 
-  it.each(FATAL)('%s reports no rows, and says so consistently', (name) => {
+  it.each(FATAL)('%s / %s reports no rows, and says so consistently', (id, title, code) => {
     const r: VerificationResponse = {
-      credential: { issuer: { id: 'did:key:z6Mkn', name: 'Springfield College' } },
-      errors: [{ name, message: 'x' }],
+      verified: false,
+      verifiableCredential: { issuer: { id: 'did:key:z6Mkn', name: 'Springfield College' } },
+      results: [
+        check(
+          id,
+          {
+            status: 'failure',
+            problems: [
+              { type: PROBLEM.proofVerification, title, detail: `${title} in this credential.` },
+            ],
+          },
+          true,
+        ),
+      ],
     };
     expect(stoppedEarly(r)).toBe(true);
     // Nothing else ran, so there is no breakdown to show. A display that
@@ -258,9 +441,10 @@ describe('verification that stopped early', () => {
     expect(listChecks(r)).toEqual([]);
 
     const out = summarise(r);
+    expect(out.code, 'the core check that failed names the outcome').toBe(code);
     expect(out.headline).toBeTruthy();
     expect(out.detail).toBeTruthy();
-    expect(out.action, `${name} offers no action`).toBeTruthy();
+    expect(out.action, `${code} offers no action`).toBeTruthy();
     expect(['error', 'unchecked']).toContain(out.severity);
   });
 });

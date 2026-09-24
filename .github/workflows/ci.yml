@@ -20,6 +20,15 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      # verifier-core is currently a git dependency, and its `prepare` script
+      # builds with pnpm — so installing it needs pnpm on the runner, which
+      # ubuntu-latest does not carry. Corepack takes the version from the
+      # dependency's own `packageManager` field.
+      #
+      # This step comes out when we move back to an npm release. It is the
+      # clearest argument for publishing `2.0.0-beta1`: every consumer of the
+      # git SHA pays this, and npm 11 flags the install script besides.
+      - run: corepack enable
       - run: npm ci
       - run: npm run lint
       - run: npm test
@@ -33,6 +42,15 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      # verifier-core is currently a git dependency, and its `prepare` script
+      # builds with pnpm — so installing it needs pnpm on the runner, which
+      # ubuntu-latest does not carry. Corepack takes the version from the
+      # dependency's own `packageManager` field.
+      #
+      # This step comes out when we move back to an npm release. It is the
+      # clearest argument for publishing `2.0.0-beta1`: every consumer of the
+      # git SHA pays this, and npm 11 flags the install script besides.
+      - run: corepack enable
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run test:browser
