@@ -2,17 +2,15 @@ import '../src/verifier-credential.js';
 import type { VerifierCredential } from '../src/verifier-credential.js';
 import type { Registry } from '../src/verify.js';
 
+const fixture = (path: string) => new URL(`./fixtures/${path}`, location.href).href;
+
 const LOCAL_REGISTRY: Registry[] = [
-  {
-    name: 'Local Dev Registry',
-    type: 'dcc-legacy',
-    url: 'http://localhost:5180/fixtures/registry.json',
-  },
+  { name: 'Local Dev Registry', type: 'dcc-legacy', url: fixture('registry.json') },
 ];
 
 /** A registry that will never answer, for the "we couldn't check" state. */
 const OFFLINE_REGISTRY: Registry[] = [
-  { name: 'Local Dev Registry', type: 'dcc-legacy', url: 'http://localhost:5180/fixtures/nope.json' },
+  { name: 'Local Dev Registry', type: 'dcc-legacy', url: fixture('nope.json') },
 ];
 
 interface Situation {

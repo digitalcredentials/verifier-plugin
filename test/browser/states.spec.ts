@@ -171,7 +171,7 @@ test.describe('lifecycle, from review', () => {
       const credential = await (await fetch('./fixtures/verified.json')).json();
       // Set before it is ever in the document, as React does on remount.
       el.registries = [
-        { name: 'Local Dev Registry', type: 'dcc-legacy', url: 'http://localhost:5180/fixtures/registry.json' },
+        { name: 'Local Dev Registry', type: 'dcc-legacy', url: new URL('./fixtures/registry.json', location.href).href },
       ];
       el.credential = credential;
       const done = new Promise((resolve) =>
