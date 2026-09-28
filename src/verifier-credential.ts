@@ -252,12 +252,14 @@ export class VerifierCredential extends HTMLElement {
       // one being waited for; ours would label it with the wrong verdict.
       if (superseded()) return;
       this.#outcome = summarise(response);
-      // verifier-core's outer catch returns errors with no `credential`
-      // echoed back, and `issuerIdentity` reads the name off the response.
+      // verifier-core can return without echoing the parsed credential back,
+      // and `issuerIdentity` reads the name off the response.
       // We were handed the credential, so supply it — otherwise a card whose
       // credential plainly names its issuer renders "Unknown issuer".
       this.#issuer = issuerIdentity(
-        response.credential ? response : { ...response, credential: this.#credential },
+        response.verifiableCredential
+          ? response
+          : { ...response, verifiableCredential: this.#credential },
       );
       this.#verdictFirst = verdictLeads(response);
       this.#caveat = contentCaveat(response);
