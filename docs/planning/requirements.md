@@ -304,6 +304,14 @@ on 29–30 September 2026.
   pretty-printed. Not the verification result — the developer view already
   shows that, group by group.
 
+When the library throws instead of returning a result — rare; nothing we
+could feed it from outside made it do so — the card says "We couldn't finish
+checking this" and still has all three views. Details says there is nothing
+to show; the developer view shows the error's name and message, never its
+stack; JSON shows the credential. That is when a developer most needs to see
+what went in, and the card keeps one shape. Added 30 September 2026; the
+approved design did not cover this state.
+
 Why a visible control rather than a disclosure: today's readers are mostly
 developers and issuers, and hiding what they came for behind "Show details"
 served nobody. The name is not final — "Developer view" or "Advanced view" —

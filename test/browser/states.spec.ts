@@ -281,6 +281,67 @@ test.describe('the three views', () => {
     expect((await detailRows(page)).join(' ')).toContain('withdrawn by the issuer');
   });
 
+  /**
+   * verifier-core returns a result for everything we could find to feed it —
+   * strings, null, bad registries — so the only way to reach this state is a
+   * credential that throws when the library reads it. `toJSON` hands back a
+   * plain copy, so the JSON view can still show what was given.
+   */
+  const hostileCredential = (page: Page, thrown: 'error' | 'object') =>
+    settle(page, () =>
+      page.evaluate(async (thrown) => {
+        const plain = await (await fetch('./fixtures/verified.json')).json();
+        const credential: Record<string, unknown> = { ...plain, toJSON: () => plain };
+        Object.defineProperty(credential, 'proof', {
+          enumerable: true,
+          get() {
+            throw thrown === 'error' ? new TypeError('proof exploded') : {};
+          },
+        });
+        (document.getElementById('vc') as HTMLElement & { credential?: unknown }).credential = credential;
+      }, thrown),
+    );
+
+  test('a check that failed outright still shows the credential, and the error', async ({ page }) => {
+    await hostileCredential(page, 'error');
+    const c = await card(page);
+    expect(c.headline).toContain('couldn’t finish checking');
+    expect(await pressedView(page)).toEqual(['Details']);
+    const root = () => page.evaluate(() => {
+      const r = document.getElementById('vc')!.shadowRoot!;
+      return {
+        empty: r.querySelector('.empty')?.textContent ?? '',
+        dev: r.querySelector('.dev')?.textContent?.replace(/\s+/g, ' ').trim() ?? '',
+        json: r.querySelector('pre.json')?.textContent ?? '',
+        foot: !!r.querySelector('.foot'),
+      };
+    });
+    const details = await root();
+    expect(details.empty).toContain('Developer view shows the error');
+    // There was no check to report "just now".
+    expect(details.foot).toBe(false);
+
+    await viewButton(page, 'Developer view').click();
+    const dev = (await root()).dev;
+    expect(dev).toContain('TypeError');
+    expect(dev).toContain('proof exploded');
+    // The message, never the stack.
+    expect(dev).not.toMatch(/\bat\s+\S+\s*\(/);
+
+    await viewButton(page, 'JSON').click();
+    const given = await page.evaluate(async () => (await fetch('./fixtures/verified.json')).json());
+    expect(JSON.parse((await root()).json)).toEqual(given);
+  });
+
+  test('an error with no message says so, rather than showing nothing', async ({ page }) => {
+    await hostileCredential(page, 'object');
+    await viewButton(page, 'Developer view').click();
+    const dev = await page.evaluate(
+      () => document.getElementById('vc')!.shadowRoot!.querySelector('.dev')!.textContent!,
+    );
+    expect(dev).toContain('It gave no message.');
+  });
+
   test('there are no views to switch while checking', async ({ page }) => {
     const buttons = await page.evaluate(async () => {
       const el = document.getElementById('vc') as HTMLElement & { credential?: unknown };
