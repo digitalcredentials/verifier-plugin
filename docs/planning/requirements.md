@@ -289,9 +289,11 @@ on 29–30 September 2026.
 
 - **Details** is what the card opens on: the earner's rows in plain words —
   Tampering, Issuer, Withdrawal, Dates, How it was built. They are always
-  visible; there is no "Show details" any more. When checking stopped before
-  any of them could be looked at (a credential with no signature, say), it says
-  so and points to the developer view, which still has checks to show.
+  visible; there is no "Show details" any more. When checking stopped early
+  (a credential with no signature, say), there is no breakdown to show, and it
+  says so. That doesn't mean nothing was looked at: a failure ends only its own
+  group of checks, the others still run, and the developer view has every one
+  of them.
 - **Developer view** shows every check the library ran, grouped by suite
   exactly as the library groups them: passed and skipped checks as well as
   failures, skipped ones with their reason, fatal ones marked. Each check is
@@ -361,7 +363,10 @@ Some specific changes, all cheap:
 - **Nothing that only restates the headline.** "Expired on 9 January 2026"
   says it all, so it no longer has "Its dates have run out" underneath. The
   line below a headline has to add something — a reassurance that actually
-  reported, or what the finding means.
+  reported, or what the finding means — and when there is nothing true to
+  add, nothing fills the gap. An expired credential normally does have
+  something: its seal held, so it reads "It hasn't been tampered with, and the
+  issuer hasn't withdrawn it." (see §5).
 - **Relative times.** "Checked 2 hours ago" rather than a full timestamp. The
   exact time can sit in the details. It must not be hover-only, since that
   leaves out keyboard, screen reader and touch users.
@@ -459,10 +464,21 @@ green "found in …". It reads:
 > Springfield College is listed in Local Dev Registry, but we can't confirm
 > this credential came from them
 
-Expired credentials are the exception and keep the green row. verifier-core
-2.x has no expiry check, so an expired credential fails the signature check,
-and hedging its issuer would move the same over-reach somewhere new. The Dates
-row says what is wrong.
+Expired credentials are the exception and keep the green row, because their
+seal did hold. verifier-core 2.x has no expiry check of its own, so an expired
+credential shows up as a failed signature — but the library underneath checks
+the dates only *after* the seal has verified. An expiry failure therefore means
+nothing was changed: the Tampering row reads "none detected", the issuer row
+stays green, and the reassurance can be said. Only the Dates row reports a
+problem. (Established from the library's code, 30 September 2026, and pinned by
+a test that alters an expired credential and checks it reads as tampered.)
+
+**The name at the top follows the same rule.** When the seal didn't hold —
+an altered credential, or one with no seal at all — the issuer's name in the
+card's header carries "(unconfirmed)", as it already does for an issuer no
+registry lists. Otherwise the header would show a plain name directly above
+a row saying we can't confirm the credential came from them. For the same
+reason, the suggested action says "the issuer" rather than naming them.
 
 This replaced a blanket caveat — "These details are what the file says. We
 can't confirm any of them." — which sat directly above a green issuer row and

@@ -57,11 +57,12 @@ test('an expired credential is a warning, and says what to do', async ({ page })
   const c = await pick(page, 'Expired');
   expect(c.severity).toBe('warning');
   expect(c.action).not.toBe('');
-  // The headline names the date, so nothing restates it underneath — and
-  // nothing empty is drawn or read out in its place.
+  // The headline names the date, so nothing restates it underneath. What
+  // does sit there is what reported: the seal held (the library checks dates
+  // after it), and the issuer set up no way to withdraw it.
   expect(c.headline).toContain('Expired on');
-  expect(await page.evaluate(() => document.getElementById('vc')!.shadowRoot!.querySelectorAll('.detail').length)).toBe(0);
-  expect(c.live).toMatch(/Expired on \d+ \w+ \d{4}\.$/);
+  expect(c.detail).toBe("It hasn't been tampered with, and the issuer hasn't withdrawn it.");
+  expect(c.detail).not.toContain('run out');
 });
 
 test('a withdrawn credential is an error and asks for a replacement', async ({ page }) => {
@@ -100,6 +101,26 @@ test('a credential with no signature says so plainly', async ({ page }) => {
   expect(c.headline).toContain("can't tell if this is genuine");
   expect(c.detail).toContain('digital seal');
   expect(c.detail).not.toContain('signature');
+});
+
+test('the issuer name is marked when the seal did not hold', async ({ page }) => {
+  // Changed and No signature: the name at the top is only the credential's
+  // own claim, and it says so, as Issuer unknown already does.
+  for (const label of ['Changed', 'No signature']) {
+    await pick(page, label);
+    const meta = await page.evaluate(
+      () => document.getElementById('vc')!.shadowRoot!.querySelector('.meta')?.textContent ?? '',
+    );
+    expect(meta, label).toContain('Springfield College (unconfirmed)');
+  }
+  // ...and not when it held, expired or not.
+  for (const label of ['Verified', 'Expired']) {
+    await pick(page, label);
+    const meta = await page.evaluate(
+      () => document.getElementById('vc')!.shadowRoot!.querySelector('.meta')?.textContent ?? '',
+    );
+    expect(meta, label).not.toContain('unconfirmed');
+  }
 });
 
 test('an unrecognised issuer is never called fake', async ({ page }) => {

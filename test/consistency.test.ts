@@ -16,8 +16,9 @@ import type { VerificationResponse, CheckResult } from '../src/types.js';
  * stop this seeing "Genuine, but we can't confirm who issued it".
  */
 const CLAIMS_UNCHANGED =
-  /(?<!\b(?:if|whether) (?:this|it) is )\bgenuine\b|n['’]t been tampered|\bnot been tampered|was(?:n['’]t| not) tampered|\buntampered\b|\bno tampering\b|n['’]t been changed|\bnot been changed|\bnothing has changed/;
-const CLAIMS_NOT_WITHDRAWN = /n['’]t been withdrawn|n['’]t withdrawn it|\bnot been withdrawn/;
+  /(?<!\b(?:if|whether) (?:this|it) is )\b(?:genuine|authentic)\b|n['’]t been (?:tampered|changed|altered|modified)|\bnot been (?:tampered|changed|altered|modified)|was(?:n['’]t| not) (?:tampered|changed|altered|modified)|\bun(?:tampered|altered|modified|changed)\b|\bintact\b|\bno tampering\b|\bnothing has changed/;
+const CLAIMS_NOT_WITHDRAWN =
+  /n['’]t been (?:withdrawn|revoked|cancelled)|n['’]t (?:withdrawn|revoked|cancelled) it|\bnot been (?:withdrawn|revoked|cancelled)|\bstill valid\b/;
 
 describe('the claim patterns themselves', () => {
   it.each([
@@ -30,6 +31,11 @@ describe('the claim patterns themselves', () => {
     'It looks genuine.',
     'Nothing has changed since it was issued.',
     "This credential hasn't been changed since it was issued.",
+    "It hasn't been altered.",
+    "It's unchanged.",
+    'It is authentic.',
+    'The credential is intact.',
+    "It hasn't been modified since it was issued.",
   ])('reads "%s" as claiming it is unchanged', (text) => {
     expect(text.toLowerCase()).toMatch(CLAIMS_UNCHANGED);
   });
@@ -41,12 +47,13 @@ describe('the claim patterns themselves', () => {
     'This credential has been tampered with',
     "Something in it was changed after it was issued. We can't tell what.",
     "We couldn't check it for tampering. That's a problem at our end, not with your credential.",
+    'This is no longer a valid credential.',
   ])('does not read "%s" as a claim', (text) => {
     expect(text.toLowerCase()).not.toMatch(CLAIMS_UNCHANGED);
     expect(text.toLowerCase()).not.toMatch(CLAIMS_NOT_WITHDRAWN);
   });
 
-  it.each(["the issuer hasn't withdrawn it", 'It has not been withdrawn.'])(
+  it.each(["the issuer hasn't withdrawn it", 'It has not been withdrawn.', "It hasn't been revoked.", "It's still valid."])(
     'reads "%s" as claiming it is not withdrawn',
     (text) => expect(text.toLowerCase()).toMatch(CLAIMS_NOT_WITHDRAWN),
   );

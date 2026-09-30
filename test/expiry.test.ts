@@ -110,11 +110,32 @@ describe('what a person is told, end to end', () => {
     const dates = rows.find((c) => c.id === `${CHECK.signature}#dates`);
     expect(dates?.severity).toBe('warning');
     expect(dates?.value).toBe('expired on 9 January 2026');
-    // The signature did not report a verdict of its own, so the row must not
-    // claim one either way.
-    expect(rows.find((c) => c.id === CHECK.signature)?.severity).toBe('unchecked');
+    // The library checks dates only after the seal verifies, so an expiry
+    // failure means nothing was changed — and the row says so.
+    expect(rows.find((c) => c.id === CHECK.signature)).toMatchObject({
+      severity: 'success',
+      value: 'none detected',
+    });
 
     const tampered = listChecks(await verify('tampered'));
     expect(tampered.find((c) => c.id === CHECK.signature)?.severity).toBe('error');
+  });
+
+  /**
+   * The assumption the row above rests on, pinned against the real library:
+   * the seal is checked before the dates. If that order ever flipped, an
+   * expired credential that had also been altered would fail on its date and
+   * read "none detected" — so this alters one and checks it fails on the seal.
+   */
+  it('checks the seal before the dates, so an altered expired credential reads as tampered', async () => {
+    const altered = fixture('expired');
+    (altered['credentialSubject'] as Record<string, unknown>)['name'] = 'Someone Else';
+    const r = (await verifyCredential({ credential: altered, registries: [], verbose: true })) as VerificationResponse;
+    const signature = signatureOf(r)!;
+    expect(signature.outcome.status).toBe('failure');
+    const detail = signature.outcome.status === 'failure' ? signature.outcome.problems.map((p) => p.detail).join(' ') : '';
+    expect(detail).not.toMatch(/validUntil|has expired/);
+    expect(summarise(r).code).toBe('invalid_signature');
+    expect(listChecks(r).find((c) => c.id === CHECK.signature)?.value).toBe('detected');
   });
 });

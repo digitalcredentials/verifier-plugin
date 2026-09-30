@@ -123,8 +123,9 @@ did.
 
 In short: four severity levels that don't grow (success, warning, error, and
 "we couldn't check"), a list of messages that does grow, plain language for the
-person who earned the credential, technical detail one click away, and careful
-wording for the common case where we can't confirm who the issuer is.
+person who earned the credential, technical detail in a developer view of its
+own, and careful wording for the common case where we can't confirm who the
+issuer is.
 
 ## What's here
 

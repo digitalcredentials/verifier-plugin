@@ -391,7 +391,7 @@ export class VerifierCredential extends HTMLElement {
     // The issuer's name carries where it came from, right where the name is.
     // People scan and read the first thing they meet, so a caveat that only
     // appears further down is a caveat many people never see.
-    const marker = this.#issuer ? issuerMarker(this.#issuer.source) : undefined;
+    const marker = this.#issuer ? issuerMarker(this.#issuer.source, this.#issuer.sealHeld) : undefined;
     const issuerName = this.#issuer?.name ?? summary.issuerName;
     const named = issuerName ? `${issuerName}${marker ? ` (${marker})` : ''}` : undefined;
     const meta = [named, issued].filter(Boolean).join(' · ');
@@ -507,11 +507,13 @@ export class VerifierCredential extends HTMLElement {
     if (failed) {
       return `<p class="empty">We couldn’t finish checking, so there are no details to show. ${esc(VIEWS[1].label)} shows the error.</p>`;
     }
-    // Verification that stopped early has no rows to show, but the library
-    // still ran checks, and the developer view has them.
+    // Verification that stopped early has no rows to show — but it did not
+    // stop the library: a fatal failure ends only its own suite, and the
+    // others still run and report. So this says there is no breakdown, not
+    // that nothing was looked at, and the developer view has every check.
     return this.#checks.length
       ? `<div class="checks" id="checks">${this.#checks.map(checkHtml).join('')}</div>`
-      : `<p class="empty">Checking stopped before any of these details could be looked at. ${esc(VIEWS[1].label)} shows what was checked.</p>`;
+      : `<p class="empty">Checking stopped early, so there's no breakdown to show here. ${esc(VIEWS[1].label)} has every check that ran.</p>`;
   }
 }
 

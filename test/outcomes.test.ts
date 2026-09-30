@@ -465,17 +465,123 @@ describe('summariseCredential', () => {
   });
 });
 
+describe('what an expired credential says', () => {
+  it('says it has not been tampered with, because the seal held', () => {
+    const r = ok();
+    expire(r);
+    const out = summarise(r);
+    expect(out.code).toBe('expired');
+    expect(out.detail).toContain("It hasn't been tampered with");
+    expect(listChecks(r).find((c) => c.id === CHECK.signature)).toMatchObject({
+      severity: 'success',
+      value: 'none detected',
+    });
+  });
+
+  it('says only the part that reported, when the withdrawal list did not load', () => {
+    const r = ok();
+    expire(r);
+    set(
+      r,
+      fail(CHECK.status, [
+        {
+          type: `${STATUS_LIST_PROBLEM_PREFIX}NOT_FOUND`,
+          title: 'Status List Not Found',
+          detail: 'The status list could not be fetched.',
+        },
+      ]),
+    );
+    const out = summarise(r);
+    expect(out.code).toBe('expired');
+    expect(out.detail).toBe("It hasn't been tampered with.");
+    expect(out.detail).not.toContain('withdrawn');
+  });
+
+  it('never calls a credential untouched when the library reports tampering and expiry together', () => {
+    const r = ok();
+    expire(r);
+    // The installed library can't produce this — it checks dates only after
+    // the seal — but the rule must not depend on that staying true.
+    set(
+      r,
+      fail(
+        CHECK.signature,
+        [
+          {
+            type: PROBLEM.invalidSignature,
+            title: 'Invalid Signature',
+            detail: `Verification error(s). The current date time is after "validUntil" (${PAST}).`,
+          },
+        ],
+        true,
+      ),
+    );
+    expect(summarise(r).code).toBe('invalid_signature');
+    expect(listChecks(r).find((c) => c.id === CHECK.signature)).toMatchObject({
+      severity: 'error',
+      value: 'detected',
+    });
+    expect(issuerIdentity(r).sealHeld).toBe(false);
+  });
+});
+
+describe('an action names the issuer only when the seal held', () => {
+  const revoke = (r: VerificationResponse) =>
+    set(
+      r,
+      fail(CHECK.status, [
+        { type: PROBLEM.revoked, title: 'Credential Revoked or Suspended', detail: 'Revoked.' },
+      ]),
+    );
+
+  it('names them when it did', () => {
+    const r = ok();
+    revoke(r);
+    expect(summarise(r).action).toBe('A new copy must be obtained from Springfield College.');
+  });
+
+  it('says "the issuer" when the seal never reported', () => {
+    const r = ok();
+    revoke(r);
+    remove(r, CHECK.signature);
+    const out = summarise(r);
+    expect(out.code).toBe('withdrawn');
+    expect(out.action).toBe('A new copy must be obtained from the issuer.');
+  });
+});
+
 describe('the issuer name carries where it came from', () => {
   it('shows no marker when a registry recognised them', async () => {
     const { issuerMarker } = await import('../src/outcomes.js');
-    expect(issuerMarker(issuerIdentity(ok()).source)).toBeUndefined();
+    expect(issuerMarker(issuerIdentity(ok()).source, issuerIdentity(ok()).sealHeld)).toBeUndefined();
+  });
+
+  it('marks a recognised issuer when the seal did not hold', async () => {
+    const { issuerMarker } = await import('../src/outcomes.js');
+    const r = ok();
+    set(r, tamperedSignature());
+    const identity = issuerIdentity(r);
+    // The registry knows the issuer; only the seal ties this credential to
+    // them, and the Issuer row says so. The name above it has to agree.
+    expect(identity.source).toBe('registry');
+    expect(identity.sealHeld).toBe(false);
+    expect(issuerMarker(identity.source, identity.sealHeld)).toBe('unconfirmed');
+  });
+
+  it('leaves an expired credential’s recognised issuer unmarked — its seal held', async () => {
+    const { issuerMarker } = await import('../src/outcomes.js');
+    const r = ok();
+    expire(r);
+    const identity = issuerIdentity(r);
+    expect(identity.sealHeld).toBe(true);
+    expect(issuerMarker(identity.source, identity.sealHeld)).toBeUndefined();
   });
 
   it('marks a name that only the credential vouches for', async () => {
     const { issuerMarker } = await import('../src/outcomes.js');
     const r = ok();
     set(r, notRegistered());
-    expect(issuerMarker(issuerIdentity(r).source)).toBe('unconfirmed');
+    expect(issuerMarker(issuerIdentity(r).source, issuerIdentity(r).sealHeld)).toBe('unconfirmed');
   });
 
   it('marks a name we could not check, differently from one we could', async () => {
@@ -496,20 +602,21 @@ describe('the issuer name carries where it came from', () => {
         },
       ]),
     );
-    expect(issuerMarker(issuerIdentity(r).source)).toBe('not checked');
+    expect(issuerMarker(issuerIdentity(r).source, issuerIdentity(r).sealHeld)).toBe('not checked');
   });
 
   it.each(['no_proof', 'invalid_credential_id'])(
-    'marks no single field when verification stopped at %s',
+    'marks the issuer unconfirmed when verification stopped at %s',
     async (name) => {
       const { issuerMarker, contentCaveat, verdictLeads } = await import('../src/outcomes.js');
       const r = STOPPED[name as keyof typeof STOPPED]();
       const identity = issuerIdentity(r);
       expect(identity.source).toBe('unverifiable');
+      expect(identity.sealHeld).toBe(false);
 
-      // We know something is wrong and not where, so marking the issuer alone
-      // would imply the other fields are fine.
-      expect(issuerMarker(identity.source)).toBeUndefined();
+      // With the blanket caveat gone, an unmarked name here would look
+      // exactly like a genuine one. Agreed with Sunny, 30 September 2026.
+      expect(issuerMarker(identity.source, identity.sealHeld)).toBe('unconfirmed');
       // The finding still leads here: nothing ran, so the credential itself is
       // what is in question.
       expect(verdictLeads(r)).toBe(true);
@@ -950,7 +1057,7 @@ describe('the marker beside the issuer name agrees with the verdict', () => {
     );
     const id = issuerIdentity(r);
     expect(id.source).toBe('unknown');
-    expect(issuerMarker(id.source)).toBe('not checked');
+    expect(issuerMarker(id.source, id.sealHeld)).toBe('not checked');
     expect(summarise(r).code).toBe('registry_unreachable');
   });
 
@@ -960,7 +1067,7 @@ describe('the marker beside the issuer name agrees with the verdict', () => {
     set(r, notRegistered());
     const id = issuerIdentity(r);
     expect(id.source).toBe('none');
-    expect(issuerMarker(id.source)).toBe('unconfirmed');
+    expect(issuerMarker(id.source, id.sealHeld)).toBe('unconfirmed');
   });
 });
 
