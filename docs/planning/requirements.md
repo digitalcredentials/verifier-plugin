@@ -275,9 +275,8 @@ on 29–30 September 2026.
   │  Springfield College · 12 March 2026   │
   │                                        │
   │  ✓ Verified                            │
-  │    Nothing has changed since it was    │
-  │    issued, and the issuer hasn't       │
-  │    withdrawn it.                       │
+  │    It hasn't been tampered with, and   │
+  │    the issuer hasn't withdrawn it.     │
   │                                        │
   │  [ Details | Developer view |  JSON  ] │
   │  Tampering              ✓ none detected│
@@ -342,16 +341,27 @@ Some specific changes, all cheap:
 - **"Withdrawn," not "revoked."** "Revoked" sounds far more serious than it
   often is. Say what it means: *this is no longer a valid credential, and a
   new copy must be obtained from the issuer.*
-- **"Hasn't been changed since it was issued,"** rather than "has a valid
-  signature."
+- **"Tampered with," not "changed since it was issued,"** and not "has a
+  valid signature." The team found tampering clearer (30 September 2026), so
+  the verdict and the Details row now use the same word: the Tampering row
+  reads *none detected*, *detected* or *not checked*; a verdict that reassures
+  says "it hasn't been tampered with"; and an altered credential's headline is
+  "This credential has been tampered with", with "Something in it was changed
+  after it was issued. We can't tell what." beneath it. The row label stays a
+  subject rather than a claim, like every other row. Going out to people for
+  feedback in this form.
 - **"The issuer hasn't withdrawn it,"** rather than "has not been revoked."
-- **"Tampering," not "Changes since issued,"** as the Details row, with the
-  values *none detected*, *the signature doesn't match* and *not checked*.
-  Named specifically, but plainly enough to put in front of someone who earned
-  the credential. The label stays a subject rather than a claim, like every
-  other row. Still to confirm with the team: those values, and whether the
-  headline for a tampered credential — "This has been changed since it was
-  issued" — should name tampering too.
+  "Withdrawn" stays for now; alternatives are being put to the team.
+- **No "signature" in front of the earner.** An average learner doesn't know
+  what a signature is for, so "this credential has no signature" told them
+  nothing. A credential without one now reads "We can't tell if this is
+  genuine — it's missing the issuer's digital seal", and asks for an official
+  copy. "Digital seal" is on trial pending feedback. The word "signature"
+  stays in the developer view, where it is the right one.
+- **Nothing that only restates the headline.** "Expired on 9 January 2026"
+  says it all, so it no longer has "Its dates have run out" underneath. The
+  line below a headline has to add something — a reassurance that actually
+  reported, or what the finding means.
 - **Relative times.** "Checked 2 hours ago" rather than a full timestamp. The
   exact time can sit in the details. It must not be hover-only, since that
   leaves out keyboard, screen reader and touch users.
@@ -470,8 +480,7 @@ right home for the raw identifier.
 
 > **ⓘ Genuine, but we can't confirm who issued it**
 >
-> This credential hasn't been changed since it was issued, and the issuer
-> hasn't withdrawn it.
+> It hasn't been tampered with, and the issuer hasn't withdrawn it.
 >
 > It says it was issued by **Springfield College**. We couldn't confirm that
 > independently — they aren't in any registry we check, which is common. It
@@ -485,9 +494,11 @@ thing and stop, so a green tick first produces exactly the false reassurance
 we're trying to avoid. "X, but Y" is how people naturally hold a fact with a
 catch, and you can't half-read it.
 
-**"Hasn't been changed since it was issued."** Not "valid," which sounds like
-we're endorsing it. Not "intact" either, which is a word about files and
-parcels and makes people wonder what might have damaged it.
+**"Hasn't been tampered with."** Not "valid," which sounds like we're
+endorsing it. Not "intact" either, which is a word about files and parcels and
+makes people wonder what might have damaged it. This was "hasn't been changed
+since it was issued" until 30 September 2026, when the Details row became
+"Tampering" and the two needed to match.
 
 **The issuer's own name, not the identifier.** Someone can't do anything with
 `did:key:z6Mkn…`. They can't look it up or contact it. They can recognise a

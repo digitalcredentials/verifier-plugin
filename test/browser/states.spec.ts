@@ -57,6 +57,11 @@ test('an expired credential is a warning, and says what to do', async ({ page })
   const c = await pick(page, 'Expired');
   expect(c.severity).toBe('warning');
   expect(c.action).not.toBe('');
+  // The headline names the date, so nothing restates it underneath — and
+  // nothing empty is drawn or read out in its place.
+  expect(c.headline).toContain('Expired on');
+  expect(await page.evaluate(() => document.getElementById('vc')!.shadowRoot!.querySelectorAll('.detail').length)).toBe(0);
+  expect(c.live).toMatch(/Expired on \d+ \w+ \d{4}\.$/);
 });
 
 test('a withdrawn credential is an error and asks for a replacement', async ({ page }) => {
@@ -91,7 +96,10 @@ test('a credential built wrong is a warning, and asks nothing of the holder', as
 test('a credential with no signature says so plainly', async ({ page }) => {
   const c = await pick(page, 'No signature');
   expect(c.severity).toBe('error');
-  expect(c.headline).toContain('no signature');
+  // Said without assuming the reader knows what a signature is for.
+  expect(c.headline).toContain("can't tell if this is genuine");
+  expect(c.detail).toContain('digital seal');
+  expect(c.detail).not.toContain('signature');
 });
 
 test('an unrecognised issuer is never called fake', async ({ page }) => {

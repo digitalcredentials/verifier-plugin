@@ -439,7 +439,8 @@ export class VerifierCredential extends HTMLElement {
       return 'We couldn’t finish checking this credential.';
     }
     const o = this.#outcome;
-    return `${announce(o.severity, o.headline)} ${o.detail}`;
+    // An expired credential's headline says it all, so its detail can be empty.
+    return o.detail ? `${announce(o.severity, o.headline)} ${o.detail}` : announce(o.severity, o.headline);
   }
 
   #verdictHtml(options: { divider?: boolean } = {}): string {
@@ -473,7 +474,7 @@ export class VerifierCredential extends HTMLElement {
         <span class="glyph s-${o.severity}" aria-hidden="true">${GLYPH[o.severity]}</span>
         <div>
           <p class="headline">${spoken}${esc(o.headline)}</p>
-          <p class="detail">${esc(o.detail)}</p>
+          ${o.detail ? `<p class="detail">${esc(o.detail)}</p>` : ''}
           ${o.action ? `<p class="action">${esc(o.action)}</p>` : ''}
         </div>
       </div>

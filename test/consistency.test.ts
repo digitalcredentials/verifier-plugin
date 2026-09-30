@@ -349,7 +349,13 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
     // rather than a third time for the instance.
     const claims = `${out.headline} ${out.detail}`.toLowerCase();
 
-    if (/\bgenuine\b|hasn't been changed|has not been changed|nothing has changed/.test(claims)) {
+    // The old phrasing stays in the pattern: a claim written either way is
+    // still a claim, and dropping it would quietly stop checking one.
+    if (
+      /\bgenuine\b|hasn't been tampered with|has not been tampered with|hasn't been changed|has not been changed|nothing has changed/.test(
+        claims,
+      )
+    ) {
       expect(
         row(CHECK.signature)?.severity,
         `${where}: claims the credential is unchanged, but the signature row says "${row(CHECK.signature)?.value}"`,
@@ -446,5 +452,12 @@ describe('verification that stopped early', () => {
     expect(out.detail).toBeTruthy();
     expect(out.action, `${code} offers no action`).toBeTruthy();
     expect(['error', 'unchecked']).toContain(out.severity);
+    // With no breakdown, the claim check above has no rows to hold the prose
+    // to, so hold it to nothing: a verdict that stopped here cannot reassure.
+    // Written for the positive claims only — "we can't tell if this is
+    // genuine" is the opposite of one.
+    expect(`${out.headline} ${out.detail}`).not.toMatch(
+      /hasn't been tampered with|has not been tampered with|hasn't withdrawn it|nothing has changed|^genuine\b/i,
+    );
   });
 });

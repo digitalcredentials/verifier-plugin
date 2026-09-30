@@ -813,7 +813,7 @@ describe('the reassurance beside a finding never outruns the checks', () => {
 
   it('claims both only when both actually reported', () => {
     const detail = summarise(withSchema(missingProperty)).detail;
-    expect(detail).toContain('Nothing has changed since it was issued');
+    expect(detail).toContain("It hasn't been tampered with");
     expect(detail).toContain("issuer hasn't withdrawn it");
   });
 
@@ -832,7 +832,7 @@ describe('the reassurance beside a finding never outruns the checks', () => {
     });
     expect(summarise(r).detail).not.toContain('withdrawn');
     // ...but the part that did report is still said.
-    expect(summarise(r).detail).toContain('Nothing has changed since it was issued');
+    expect(summarise(r).detail).toContain("It hasn't been tampered with");
   });
 
   it('claims nothing about the signature when the signature never reported', () => {
@@ -840,7 +840,7 @@ describe('the reassurance beside a finding never outruns the checks', () => {
       remove(x, CHECK.signature);
     });
     const detail = summarise(r).detail;
-    expect(detail).not.toContain('Nothing has changed');
+    expect(detail).not.toContain('tampered');
     expect(detail).not.toContain('withdrawn');
     expect(detail).toContain('leaves out details');
   });

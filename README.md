@@ -223,8 +223,8 @@ Open on the wording, and none of them are bugs:
   and on a good credential it says "as the standard expects" — a row almost
   nobody needs, on the screen almost everybody sees.
 - **Should a warning also reassure?** "This credential is missing information
-  it should have" is followed by "Nothing has changed since it was issued, and
-  the issuer hasn't withdrawn it." The breakdown already says both.
+  it should have" is followed by "It hasn't been tampered with, and the issuer
+  hasn't withdrawn it." The breakdown already says both.
 - **Does "There's nothing for you to do" reassure, or dismiss?** It comes from
   Nate's remark that most of these are not errors the holder could resolve
   themselves. It is the point of that outcome and the least settled part of

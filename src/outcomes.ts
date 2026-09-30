@@ -543,14 +543,22 @@ const FATAL: Record<string, Omit<Outcome, 'code'>> = {
   },
   no_proof: {
     severity: 'error',
-    headline: 'This credential has no signature',
-    detail: "There's nothing to check. Anyone could have written it.",
-    action: 'Ask the issuer for a properly signed copy.',
+    // Reviewed with Sunny, 30 September 2026: an average learner doesn't know
+    // what a signature is for, so "no signature" told them nothing. The seal
+    // is the plain-language stand-in, on trial pending feedback. The action
+    // says "the issuer" rather than naming them: with no seal, the name
+    // inside is exactly the thing we can't vouch for.
+    headline: "We can't tell if this is genuine",
+    detail:
+      "It's missing the issuer's digital seal — the part that proves it came from them and shows whether anyone has tampered with it.",
+    action: 'Ask the issuer for an official copy.',
   },
   invalid_signature: {
     severity: 'error',
-    headline: 'This has been changed since it was issued',
-    detail: "We can't tell you what was changed, only that something was.",
+    // "Tampered", to match the Tampering row beneath it. The team found it
+    // clearer than "changed since it was issued", 30 September 2026.
+    headline: 'This credential has been tampered with',
+    detail: "Something in it was changed after it was issued. We can't tell what.",
     action: 'Ask the issuer for a fresh copy.',
   },
   // The two below mean we could not find out — not that anything is wrong.
@@ -594,7 +602,7 @@ const UNCHECKED_SIGNATURE: Omit<Outcome, 'code'> = {
   severity: 'unchecked',
   headline: "We couldn't finish checking this",
   detail:
-    "We couldn't confirm whether this has been changed since it was issued. That's a problem at our end, not with your credential.",
+    "We couldn't check it for tampering. That's a problem at our end, not with your credential.",
   action: 'Try again in a moment.',
 };
 
@@ -619,8 +627,8 @@ const reassurance = (
   if (!passed(checks.get(CHECK.signature))) return '';
   const notWithdrawn = !hasStatusList(r) || passed(checks.get(CHECK.status));
   return notWithdrawn
-    ? " Nothing has changed since it was issued, and the issuer hasn't withdrawn it."
-    : ' Nothing has changed since it was issued.';
+    ? " It hasn't been tampered with, and the issuer hasn't withdrawn it."
+    : " It hasn't been tampered with.";
 };
 
 /**
@@ -753,8 +761,9 @@ export const summarise = (r: VerificationResponse): Outcome => {
       // Usually empty, because the signature check is what failed on the date
       // and so has not reported. It is assembled rather than written out so
       // that it appears when the checks behind it did pass, and stays absent
-      // when they did not.
-      detail: `Its dates have run out.${reassurance(r, checks)}`,
+      // when they did not. There is no fixed sentence before it: "Its dates
+      // have run out" only restated the headline.
+      detail: reassurance(r, checks).trim(),
       action: `Ask ${issuer.name} whether it can be renewed.`,
     };
   }
@@ -862,7 +871,7 @@ export const summarise = (r: VerificationResponse): Outcome => {
       severity: 'unchecked',
       code: 'issuer_unconfirmed',
       headline: "Genuine, but we can't confirm who issued it",
-      detail: `This credential hasn't been changed since it was issued, and the issuer hasn't withdrawn it. ${says}`,
+      detail: `It hasn't been tampered with, and the issuer hasn't withdrawn it. ${says}`,
     };
   }
 
@@ -882,7 +891,7 @@ export const summarise = (r: VerificationResponse): Outcome => {
     severity: 'success',
     code: 'verified',
     headline: 'Verified',
-    detail: "Nothing has changed since it was issued, and the issuer hasn't withdrawn it.",
+    detail: "It hasn't been tampered with, and the issuer hasn't withdrawn it.",
   };
 };
 
@@ -914,13 +923,13 @@ export const listChecks = (r: VerificationResponse): Check[] => {
     // than a claim, as every other row does.
     label: 'Tampering',
     // Only a signature failure we could attribute to tampering says so. An
-    // expired credential also fails this check, and reporting that as "the
-    // signature doesn't match" would contradict the Dates row directly below.
+    // expired credential also fails this check, and reporting that as
+    // "tampering detected" would contradict the Dates row directly below.
     severity: passed(signature) ? 'success' : tampered ? 'error' : 'unchecked',
     value: passed(signature)
       ? 'none detected'
       : tampered
-        ? "the signature doesn't match"
+        ? 'detected'
         : 'not checked',
   });
 

@@ -101,7 +101,7 @@ describe('what a person is told, end to end', () => {
     const out = summarise(await verify('tampered'));
     expect(out.code).toBe('invalid_signature');
     expect(out.severity).toBe('error');
-    expect(out.headline).toBe('This has been changed since it was issued');
+    expect(out.headline).toBe('This credential has been tampered with');
   });
 
   it('agrees with the breakdown in both cases', async () => {
