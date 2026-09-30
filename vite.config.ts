@@ -2,6 +2,10 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   root: 'dev',
+  // The withdrawal fixtures have localhost:5180 signed into them, so the dev
+  // server has to be there. strictPort fails loudly if 5180 is taken, rather
+  // than moving to another port where Withdrawn and Not withdrawn quietly break.
+  server: { port: 5180, strictPort: true },
   build: {
     outDir: '../dist',
     emptyOutDir: true,
