@@ -30,7 +30,10 @@ const card = (page: Page) =>
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     window.__done = 0;
-    document.addEventListener('verification-complete', () => (window.__done as number)++);
+    document.addEventListener('verification-complete', (e) => {
+      window.__response = (e as CustomEvent).detail.response;
+      (window.__done as number)++;
+    });
     document.addEventListener('verification-failed', () => (window.__done as number)++);
   });
   await page.goto('/');
@@ -138,17 +141,155 @@ test('the severity is not said twice when the headline already says it', async (
   expect(c.live).not.toMatch(/verified[.,]?\s+verified/i);
 });
 
-test('details open and list the checks that ran', async ({ page }) => {
-  await pick(page, 'Withdrawn');
-  const toggle = page.locator('#vc').locator('#toggle');
-  await toggle.click();
-  const rows = await page.evaluate(() =>
+/** One of the card's three views, found the way a person finds it: by name. */
+const viewButton = (page: Page, name: string) =>
+  page.locator('#vc').getByRole('button', { name, exact: true });
+
+/** Which view is showing, as a screen reader is told it. */
+const pressedView = (page: Page) =>
+  page.evaluate(() =>
+    [...document.getElementById('vc')!.shadowRoot!.querySelectorAll('button[data-view]')]
+      .filter((b) => b.getAttribute('aria-pressed') === 'true')
+      .map((b) => b.textContent!.trim()),
+  );
+
+const detailRows = (page: Page) =>
+  page.evaluate(() =>
     [...document.getElementById('vc')!.shadowRoot!.querySelectorAll('.check')].map((r) =>
       r.textContent!.replace(/\s+/g, ' ').trim(),
     ),
   );
+
+test('details are showing without being asked for, and list the checks that ran', async ({ page }) => {
+  await pick(page, 'Withdrawn');
+  expect(await pressedView(page)).toEqual(['Details']);
+  const rows = await detailRows(page);
   expect(rows.length).toBeGreaterThan(0);
   expect(rows.join(' ')).toContain('Withdrawal');
+});
+
+test.describe('the three views', () => {
+  test('switching views does not re-announce, and keeps focus on the button used', async ({ page }) => {
+    await pick(page, 'Withdrawn');
+    // Count every write to the live region from here on. Showing the same
+    // result another way is not news.
+    await page.evaluate(() => {
+      const live = document.getElementById('vc')!.shadowRoot!.querySelector('[role="status"]')!;
+      window.__announced = 0;
+      new MutationObserver(() => (window.__announced as number)++).observe(live, {
+        childList: true,
+        characterData: true,
+        subtree: true,
+      });
+    });
+
+    const focusedView = () =>
+      page.evaluate(
+        () => (document.getElementById('vc')!.shadowRoot!.activeElement as HTMLElement | null)?.dataset['view'],
+      );
+
+    await viewButton(page, 'Developer view').click();
+    expect(await pressedView(page)).toEqual(['Developer view']);
+    expect(await focusedView()).toBe('developer');
+
+    // And from the keyboard alone.
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Enter');
+    expect(await pressedView(page)).toEqual(['JSON']);
+    expect(await focusedView()).toBe('json');
+    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Space');
+    expect(await pressedView(page)).toEqual(['Details']);
+    expect(await focusedView()).toBe('details');
+
+    expect(await page.evaluate(() => window.__announced)).toBe(0);
+  });
+
+  test('the developer view shows every check, in the library’s groups and words', async ({ page }) => {
+    await pick(page, 'Withdrawn');
+    await viewButton(page, 'Developer view').click();
+    const { shown, expected } = await page.evaluate(() => {
+      const root = document.getElementById('vc')!.shadowRoot!;
+      const text = (el: Element | null) => el?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+      const r = window.__response as {
+        verified: boolean;
+        summary: { id: string; message: string }[];
+        results: { outcome: { status: string } }[];
+      };
+      return {
+        shown: {
+          bar: text(root.querySelector('.dev-bar')),
+          groups: [...root.querySelectorAll('.suite')].map((g) => ({
+            id: text(g.querySelector('.suite-id')),
+            message: text(g.querySelector('.suite-count')),
+          })),
+          checks: root.querySelectorAll('.dev-check').length,
+          text: text(root.querySelector('.dev')),
+        },
+        expected: {
+          verified: r.verified,
+          groups: r.summary.map((s) => ({ id: s.id, message: s.message })),
+          checks: r.results.length,
+        },
+      };
+    });
+    expect(shown.bar).toContain(`verified: ${expected.verified}`);
+    expect(shown.groups).toEqual(expected.groups);
+    expect(shown.checks).toBe(expected.checks);
+    // Passed, skipped and failed checks all appear, each in the library's own
+    // words, with the status said as well as drawn.
+    expect(shown.text).toContain('Passed: context-exists');
+    expect(shown.text).toContain('Credential has a valid @context property.');
+    expect(shown.text).toContain('Failed: bitstring');
+    expect(shown.text).toContain('Credential Revoked or Suspended');
+    expect(shown.text).toContain('The credential has been revoked or suspended according to the status list.');
+    // A real space, or a screen reader says "context-existsfatal".
+    expect(shown.text).toContain('context-exists fatal');
+  });
+
+  test('the developer view says why a check was skipped', async ({ page }) => {
+    await pick(page, 'Verified');
+    await viewButton(page, 'Developer view').click();
+    const text = await page.evaluate(
+      () => document.getElementById('vc')!.shadowRoot!.querySelector('.dev')!.textContent!.replace(/\s+/g, ' '),
+    );
+    expect(text).toContain('Skipped: bitstring');
+    expect(text).toContain('Credential has no credentialStatus.');
+  });
+
+  test('the JSON view shows the credential exactly as it was passed in', async ({ page }) => {
+    await pick(page, 'Expired');
+    await viewButton(page, 'JSON').click();
+    // Compared with a fresh copy of the file, not with the object the card
+    // holds, so a credential altered in place during checking would show up.
+    const { shown, given } = await page.evaluate(async () => {
+      const el = document.getElementById('vc')!;
+      const given = await (await fetch('./fixtures/expired.json')).json();
+      return { shown: el.shadowRoot!.querySelector('pre.json')!.textContent!, given };
+    });
+    expect(JSON.parse(shown)).toEqual(given);
+    // Not the verification result, which has its own view.
+    expect(shown).not.toContain('"results"');
+  });
+
+  test('a new credential opens on Details again', async ({ page }) => {
+    await pick(page, 'Verified');
+    await viewButton(page, 'JSON').click();
+    await pick(page, 'Withdrawn');
+    expect(await pressedView(page)).toEqual(['Details']);
+    expect((await detailRows(page)).join(' ')).toContain('withdrawn by the issuer');
+  });
+
+  test('there are no views to switch while checking', async ({ page }) => {
+    const buttons = await page.evaluate(async () => {
+      const el = document.getElementById('vc') as HTMLElement & { credential?: unknown };
+      el.credential = await (await fetch('./fixtures/verified.json')).json();
+      await new Promise((r) => setTimeout(r, 0));
+      return el.shadowRoot!.querySelectorAll('button[data-view]').length;
+    });
+    expect(buttons).toBe(0);
+  });
 });
 
 test.describe('lifecycle, from review', () => {
@@ -244,11 +385,18 @@ test.describe('lifecycle, from review', () => {
       () => document.getElementById('vc')!.shadowRoot!.querySelector('.foot')?.textContent?.trim(),
     );
     expect(foot).toContain('Checked');
-    // ...but there is no per-check list to open.
-    const toggle = await page.evaluate(
-      () => !!document.getElementById('vc')!.shadowRoot!.querySelector('#toggle'),
+    // ...but Details has no rows to show, and says where to look instead.
+    expect(await detailRows(page)).toEqual([]);
+    const empty = await page.evaluate(
+      () => document.getElementById('vc')!.shadowRoot!.querySelector('.empty')?.textContent ?? '',
     );
-    expect(toggle).toBe(false);
+    expect(empty).toContain('Developer view');
+    // The library still ran checks, and the developer view has them.
+    await viewButton(page, 'Developer view').click();
+    const checks = await page.evaluate(
+      () => document.getElementById('vc')!.shadowRoot!.querySelectorAll('.dev-check').length,
+    );
+    expect(checks).toBeGreaterThan(0);
   });
 
   test('does not say "checked just now" while it is still checking', async ({ page }) => {
@@ -271,26 +419,28 @@ test.describe('lifecycle, from review', () => {
 
   test('changing the registries clears the previous details, not just the verdict', async ({ page }) => {
     await pick(page, 'Verified');
-    await page.locator('#vc').locator('#toggle').click();
-    const before = await page.evaluate(
-      () => document.getElementById('vc')!.shadowRoot!.querySelectorAll('.check').length,
-    );
-    expect(before).toBeGreaterThan(0);
+    expect((await detailRows(page)).length).toBeGreaterThan(0);
+    await viewButton(page, 'Developer view').click();
 
-    // Mid-check, the old run's rows must be gone rather than sitting under a
-    // verdict that no longer describes them.
+    // Mid-check, the old run's rows and checks must be gone rather than
+    // sitting under a verdict that no longer describes them.
     const during = await page.evaluate(async () => {
       const el = document.getElementById('vc') as HTMLElement & { registries?: unknown };
       el.registries = [];
       await new Promise((r) => setTimeout(r, 0));
-      return el.shadowRoot!.querySelectorAll('.check').length;
+      return el.shadowRoot!.querySelectorAll('.check, .dev-check').length;
     });
     expect(during).toBe(0);
+
+    // And the new result opens on Details, not on the view the old one was left in.
+    await page.waitForFunction(
+      () => !!document.getElementById('vc')!.shadowRoot!.querySelector('button[data-view]'),
+    );
+    expect(await pressedView(page)).toEqual(['Details']);
   });
 
   test('a detail row is not read out as "Verified: none"', async ({ page }) => {
     await pick(page, 'Verified');
-    await page.locator('#vc').locator('#toggle').click();
     const spoken = await page.evaluate(() =>
       [...document.getElementById('vc')!.shadowRoot!.querySelectorAll('.check')]
         .map((r) => r.textContent!.replace(/\s+/g, ' ').trim())

@@ -5,7 +5,7 @@
  * design can be tested without a browser:
  *
  *   summarise()  — the single line the main view shows
- *   listChecks() — the per-check breakdown behind "show details"
+ *   listChecks() — the per-check breakdown in the Details view
  *
  * The rules come from requirements.md §4 and §5 and inventory.md. Four
  * severities that never grow; a message list that does.
@@ -887,7 +887,7 @@ export const summarise = (r: VerificationResponse): Outcome => {
 };
 
 // ---------------------------------------------------------------------------
-// The breakdown behind "show details"
+// The breakdown in the Details view
 // ---------------------------------------------------------------------------
 
 export const listChecks = (r: VerificationResponse): Check[] => {
