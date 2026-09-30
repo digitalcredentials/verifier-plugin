@@ -28,6 +28,11 @@ export interface Outcome {
   severity: Severity;
   code: string;
   headline: string;
+  /**
+   * What the headline means, or what else reported. Can be empty: "Expired
+   * on 9 January 2026" needs nothing beneath it unless a reassurance actually
+   * reported. Draw it only when it has text.
+   */
   detail: string;
   /** Every problem names one thing to do. requirements.md §4. */
   action?: string;
