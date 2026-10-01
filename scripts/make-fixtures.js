@@ -7,6 +7,13 @@
  * tampered instead of expired, and we'd be testing the wrong thing.
  *
  *   node scripts/make-fixtures.js
+ *
+ * The published demo site needs its own set, because a credential names its
+ * withdrawal list by full address and the published site lives somewhere
+ * else. scripts/build-site.js runs this with both settings below.
+ *
+ *   FIXTURES_STATUS_LIST_URL  where the withdrawal list will be served
+ *   FIXTURES_OUT              the folder to write into
  */
 
 import { writeFile, mkdir } from 'node:fs/promises';
@@ -19,17 +26,20 @@ import { Ed25519Signature2020 } from '@digitalcredentials/ed25519-signature-2020
 import { securityLoader } from '@digitalcredentials/security-document-loader';
 import { createList, createCredential } from '@digitalcredentials/vc-bitstring-status-list';
 
-const OUT = join(dirname(fileURLToPath(import.meta.url)), '..', 'dev', 'fixtures');
+const OUT =
+  process.env.FIXTURES_OUT ?? join(dirname(fileURLToPath(import.meta.url)), '..', 'dev', 'fixtures');
 
 /**
- * Where the status list is served from while developing.
+ * Where the status list is served from: the dev server by default, which is
+ * why the dev server is pinned to port 5180 (vite.config.ts).
  *
- * Same origin as the dev page on purpose. Fetching a status list cross-origin
- * fails in a browser today (the CORS preflight problem that verifier-core
- * can't currently work around), so serving it from the dev server is the only
- * way to exercise the withdrawn and not-withdrawn states at all.
+ * Same origin as the page on purpose, here and on the published site. A
+ * status list on another site is the case a real wallet meets, and is tested
+ * separately; these fixtures are for exercising the withdrawn and
+ * not-withdrawn states predictably.
  */
-const STATUS_LIST_URL = 'http://localhost:5180/fixtures/status-list.json';
+const STATUS_LIST_URL =
+  process.env.FIXTURES_STATUS_LIST_URL ?? 'http://localhost:5180/fixtures/status-list.json';
 const WITHDRAWN_INDEX = 42;
 const LIST_LENGTH = 131072;
 
@@ -200,14 +210,18 @@ const main = async () => {
 
   // --- a registry that recognises our test issuer ---------------------------
   // Lets the dev page show the success state. Same shape as the real DCC
-  // sandbox registry, served from the dev server.
+  // sandbox registry, served from the dev server — and, since the demo site
+  // went up, from digitalcredentials.github.io too. That address lends it
+  // credibility it must not have: the issuer's key comes from a fixed seed in
+  // this public file, so anyone can sign anything as it. The note says so, in
+  // the file, for whoever finds it there.
   await write(
     'registry',
     {
       meta: {
         created: '2026-09-21T00:00:00Z',
         updated: '2026-09-21T00:00:00Z',
-        note: 'Local development registry. Not a real one.',
+        note: 'TEST ONLY — not a real registry. It exists so the verifier-plugin demo page can show what a recognised issuer looks like. The private key for the issuer listed here is public (scripts/make-fixtures.js in github.com/digitalcredentials/verifier-plugin), so anyone can sign credentials as it. Never configure this file as a registry in anything real.',
       },
       registry: {
         [issuerDid]: {
@@ -220,7 +234,7 @@ const main = async () => {
     'a local registry that recognises the test issuer',
   );
 
-  console.log('written to dev/fixtures/');
+  console.log(`written to ${OUT}`);
   for (const [name, note] of written) console.log(`  ${name.padEnd(15)} ${note}`);
 };
 

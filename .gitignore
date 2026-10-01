@@ -66,6 +66,7 @@ playwright-report/
 test-results/
 # Build output
 dist
+site
 test-results
 playwright-report
 *.tsbuildinfo

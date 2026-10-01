@@ -2,7 +2,7 @@
   "meta": {
     "created": "2026-09-21T00:00:00Z",
     "updated": "2026-09-21T00:00:00Z",
-    "note": "Local development registry. Not a real one."
+    "note": "TEST ONLY — not a real registry. It exists so the verifier-plugin demo page can show what a recognised issuer looks like. The private key for the issuer listed here is public (scripts/make-fixtures.js in github.com/digitalcredentials/verifier-plugin), so anyone can sign credentials as it. Never configure this file as a registry in anything real."
   },
   "registry": {
     "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z": {
