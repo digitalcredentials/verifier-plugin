@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { test, expect, type Page } from '@playwright/test';
 
 /**
@@ -27,7 +28,29 @@ const card = (page: Page) =>
     };
   });
 
+/**
+ * verifier-core fetches the Open Badges schema from purl.imsglobal.org on
+ * every verification, uncached. On 1 October 2026 one fetch took 52s and
+ * timed out 11 tests, so the tests serve a copy instead, downloaded from
+ * SCHEMA on that date (Last-Modified 23 October 2025). To refresh it,
+ * download SCHEMA over the copy. Any other request to that host is refused
+ * and fails the test, so a new dependency on it shows up straight away
+ * rather than as a slow run. Nate plans to drop this schema check from
+ * verifier-core; once it is gone, delete the copy and this route.
+ */
+const SCHEMA = 'https://purl.imsglobal.org/spec/ob/v3p0/schema/json/ob_v3p0_achievementcredential_schema.json';
+const SCHEMA_COPY = fileURLToPath(new URL('./fixtures/ob_v3p0_achievementcredential_schema.json', import.meta.url));
+const stray: string[] = [];
+
 test.beforeEach(async ({ page }) => {
+  stray.length = 0;
+  await page.route('https://purl.imsglobal.org/**', (route) => {
+    if (route.request().url() === SCHEMA) {
+      return route.fulfill({ path: SCHEMA_COPY, headers: { 'access-control-allow-origin': '*' } });
+    }
+    stray.push(route.request().url());
+    return route.abort('blockedbyclient');
+  });
   await page.addInitScript(() => {
     window.__done = 0;
     document.addEventListener('verification-complete', () => (window.__done as number)++);
@@ -37,6 +60,10 @@ test.beforeEach(async ({ page }) => {
   // against a published copy (PLAYWRIGHT_BASE_URL), not at the domain root.
   await page.goto('./');
   await page.waitForFunction(() => (window.__done ?? 0) > 0, null, { timeout: 30_000 });
+});
+
+test.afterEach(() => {
+  expect(stray, 'requests to purl.imsglobal.org other than the schema').toEqual([]);
 });
 
 const pick = async (page: Page, label: string) => {
