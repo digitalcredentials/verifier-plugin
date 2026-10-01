@@ -1,0 +1,307 @@
+name: Preview
+
+# Publishes the demo page to GitHub Pages, so anyone can try the card with no
+# setup: main at /verifier-plugin/, and each pull request at
+# /verifier-plugin/pr-<number>/ until it closes. Then runs the browser tests
+# against the published copy, because that is what people will look at.
+#
+# Needs Pages switched on once, in Settings → Pages, set to deploy from the
+# gh-pages branch, root folder. The first run creates that branch.
+#
+# Kept apart from CI on purpose. CI never holds a token that can write, and
+# `npm ci` runs install scripts from every dependency. So the jobs that install
+# and build run read-only, and the jobs that can write to the site install
+# nothing and trust nothing from those jobs but the built files: where the
+# files go is worked out again from the event itself.
+#
+# Worth knowing: every DCC Pages site shares one origin,
+# digitalcredentials.github.io, so script published here runs alongside the
+# others. Only people who can push to this repository can publish a preview.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+permissions:
+  contents: read
+
+# One run per pull request (or per push to main) at a time, and a newer one
+# cancels an older one. So two quick pushes can't publish out of order, and
+# closing a PR cancels its in-flight build before that build could put the
+# preview back after it was removed.
+concurrency:
+  group: preview-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  SITE: https://digitalcredentials.github.io/verifier-plugin/
+
+jobs:
+  build:
+    # Previews only for branches in this repository: a pull request from a
+    # fork could otherwise put anything on our site. Dependabot is left out
+    # too, because GitHub never gives its pull requests a token that can write.
+    if: >-
+      github.event.action != 'closed' &&
+      (github.event_name == 'push' ||
+       (github.event.pull_request.head.repo.full_name == github.repository &&
+        github.event.pull_request.user.login != 'dependabot[bot]'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      # verifier-core is a git dependency whose `prepare` script needs pnpm.
+      # See ci.yml.
+      - run: corepack enable
+      - run: npm ci
+      # Builds the page and signs fresh test credentials for this address.
+      - name: Build the site for its address
+        env:
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: node scripts/build-site.js "${SITE}${NUMBER:+pr-$NUMBER/}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: site
+          path: site/
+          retention-days: 1
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    outputs:
+      published: ${{ steps.copy.outputs.published }}
+    permissions:
+      contents: write # to push the gh-pages branch
+      pull-requests: write # to comment the preview link
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      NUMBER: ${{ github.event.pull_request.number }}
+      # The commit this build is of: the PR's head, or main's tip.
+      BUILT_FROM: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: site
+          path: site
+      - name: Copy it onto the gh-pages branch
+        id: copy
+        shell: bash
+        run: |
+          # Where it goes comes from the event, not from the build job.
+          if [ -n "$NUMBER" ]; then
+            case "$NUMBER" in *[!0-9]*) echo "Unexpected PR number: $NUMBER"; exit 1 ;; esac
+            folder="pr-$NUMBER"
+          else
+            folder=""
+            # main is copied over the site root, so a build carrying pr-*
+            # folders could overwrite someone's preview. A real one never has.
+            if compgen -G 'site/pr-*' > /dev/null; then
+              echo "The main build contains preview folders; refusing to publish it."
+              exit 1
+            fi
+          fi
+
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+
+          # Several runs can write to gh-pages at once, each to its own folder.
+          # Rather than queue (GitHub silently drops all but one waiting job),
+          # each starts from the latest branch and retries if another got there
+          # first.
+          for attempt in 1 2 3 4 5; do
+            # Only publish what is still current: an open PR at this commit,
+            # or main at this commit. A re-run of an older run would
+            # otherwise put old code over new. A failed lookup fails the step
+            # rather than reading as "closed".
+            if [ -n "$NUMBER" ]; then
+              current=$(gh pr view "$NUMBER" --repo "$REPO" --json state,headRefOid -q '.state + " " + .headRefOid')
+              if [ "$current" != "OPEN $BUILT_FROM" ]; then
+                echo "PR #$NUMBER is now '$current', not 'OPEN $BUILT_FROM'; not publishing this build."
+                echo "published=false" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            else
+              tip=$(git ls-remote "$remote" refs/heads/main | cut -f1)
+              if [ "$tip" != "$BUILT_FROM" ]; then
+                echo "main has moved on to $tip; not publishing $BUILT_FROM."
+                echo "published=false" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            fi
+            rm -rf pages
+            # 6. Exactly refs/heads/gh-pages. An error here fails the step;
+            # only an empty answer means the branch doesn't exist yet.
+            existing=$(git ls-remote "$remote" refs/heads/gh-pages)
+            if [ -n "$existing" ]; then
+              git clone --quiet --depth 1 --branch gh-pages "$remote" pages
+            else
+              git init --quiet -b gh-pages pages
+              git -C pages remote add origin "$remote"
+            fi
+            # Serve files as they are; GitHub's Jekyll step would skip some.
+            touch pages/.nojekyll
+            target="pages${folder:+/$folder}"
+            mkdir -p "$target"
+            # Keep the assets the page being replaced still uses: their names
+            # are unique to each build, and a visitor whose browser still has
+            # that page needs them for a few minutes. Older ones go, so the
+            # site doesn't grow with every merge.
+            # "Uses" includes what those files load in turn — a chunk the page's
+            # script imports later is named only inside that script — so keep
+            # following references until nothing new turns up.
+            if [ -d "$target/assets" ]; then
+              keep=$(cd "$target/assets" && for f in *; do grep -qF "$f" ../index.html 2>/dev/null && echo "$f"; done || true)
+              while :; do
+                more=$(cd "$target/assets" && for f in *; do
+                  printf '%s\n' "$keep" | grep -qxF "$f" && continue
+                  for k in $keep; do grep -qF "$f" "$k" && { echo "$f"; break; }; done
+                done || true)
+                [ -n "$more" ] || break
+                keep=$(printf '%s\n%s\n' "$keep" "$more")
+              done
+              for file in "$target"/assets/*; do
+                [ -e "$file" ] || continue
+                printf '%s\n' "$keep" | grep -qxF "$(basename "$file")" || rm -f "$file"
+              done
+            fi
+            # Replace everything else in this copy. On main, leave the open
+            # previews alone.
+            find "$target" -mindepth 1 -maxdepth 1 ! -name .git ! -name .nojekyll ! -name assets ! -name 'pr-*' -exec rm -rf {} +
+            cp -R site/. "$target/"
+            cd pages
+            git add -A
+            if git diff --cached --quiet; then
+              echo "Nothing changed: this build is already published."
+              echo "published=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            git commit --quiet -m "Publish ${folder:-main} at ${GITHUB_SHA}"
+            if git push --quiet origin gh-pages; then
+              echo "published=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            cd ..
+            [ "$attempt" -lt 5 ] || break
+            echo "Someone else published first; trying again ($attempt)."
+            sleep $((attempt * 5))
+          done
+          echo "Couldn't publish after 5 attempts."
+          exit 1
+      - name: Comment the preview link, once
+        if: github.event_name == 'pull_request' && steps.copy.outputs.published == 'true'
+        # A comment that fails to post mustn't stop the published copy being
+        # tested, so this step can't fail the job.
+        continue-on-error: true
+        shell: bash
+        run: |
+          marker='<!-- preview-link -->'
+          existing=$(gh api "repos/$REPO/issues/$NUMBER/comments" --paginate \
+            -q ".[] | select(.body | contains(\"$marker\")) | .id" | head -1)
+          if [ -z "$existing" ]; then
+            gh pr comment "$NUMBER" --repo "$REPO" --body "$marker
+          **Try it:** ${SITE}pr-$NUMBER/
+
+          Updates on every push to this PR, and goes away when it closes. The browser tests run against this copy too."
+          fi
+
+  test-published:
+    needs: publish
+    if: needs.publish.outputs.published == 'true'
+    runs-on: ubuntu-latest
+    env:
+      NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: site
+          path: built
+      - uses: actions/checkout@v7
+        with:
+          path: repo
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: repo/package-lock.json
+      - run: corepack enable
+      - run: npm ci
+        working-directory: repo
+      - run: npx playwright install --with-deps chromium
+        working-directory: repo
+      # GitHub Pages takes a minute or so to serve a new push. Wait until the
+      # page itself — fetched the way a browser would, with no cache-buster —
+      # is the one this run built, so the tests can't run against a cached
+      # older copy.
+      - name: Wait until the published copy is this build
+        run: |
+          url="${SITE}${NUMBER:+pr-$NUMBER/}"
+          for attempt in $(seq 1 60); do
+            if curl -fsS "$url" -o live.html && cmp -s live.html built/index.html; then
+              echo "Live after $attempt checks."
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "The published page never became this build."
+          echo "If this is the first run, check Settings → Pages is set to deploy from gh-pages."
+          exit 1
+      - name: Run the browser tests against it
+        working-directory: repo
+        run: PLAYWRIGHT_BASE_URL="${SITE}${NUMBER:+pr-$NUMBER/}" npm run test:browser
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-report-published
+          path: repo/playwright-report/
+          retention-days: 7
+
+  remove:
+    # A closed pull request's preview is taken down.
+    if: >-
+      github.event.action == 'closed' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read # to check the PR is still closed
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      - name: Delete pr-<number> from the gh-pages branch
+        shell: bash
+        run: |
+          case "$NUMBER" in ''|*[!0-9]*) echo "Unexpected PR number: $NUMBER"; exit 1 ;; esac
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for attempt in 1 2 3 4 5; do
+            # A re-run of an old close must not take down a reopened PR's
+            # preview. A failed lookup fails the step.
+            state=$(gh pr view "$NUMBER" --repo "$REPO" --json state -q .state)
+            [ "$state" != "OPEN" ] || { echo "PR #$NUMBER is open again; leaving its preview."; exit 0; }
+            rm -rf pages
+            existing=$(git ls-remote "$remote" refs/heads/gh-pages)
+            [ -n "$existing" ] || { echo "No gh-pages branch; nothing to remove."; exit 0; }
+            git clone --quiet --depth 1 --branch gh-pages "$remote" pages
+            [ -d "pages/pr-$NUMBER" ] || { echo "No preview for #$NUMBER."; exit 0; }
+            cd pages
+            git rm -rq "pr-$NUMBER"
+            git commit --quiet -m "Remove the preview for #$NUMBER"
+            if git push --quiet origin gh-pages; then exit 0; fi
+            cd ..
+            [ "$attempt" -lt 5 ] || break
+            echo "Someone else published first; trying again ($attempt)."
+            sleep $((attempt * 5))
+          done
+          echo "Couldn't remove the preview after 5 attempts."
+          exit 1
