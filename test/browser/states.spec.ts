@@ -33,7 +33,9 @@ test.beforeEach(async ({ page }) => {
     document.addEventListener('verification-complete', () => (window.__done as number)++);
     document.addEventListener('verification-failed', () => (window.__done as number)++);
   });
-  await page.goto('/');
+  // Relative, so it lands in the site's sub-folder when the tests run
+  // against a published copy (PLAYWRIGHT_BASE_URL), not at the domain root.
+  await page.goto('./');
   await page.waitForFunction(() => (window.__done ?? 0) > 0, null, { timeout: 30_000 });
 });
 

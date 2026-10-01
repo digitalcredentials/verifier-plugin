@@ -18,8 +18,15 @@ Working. A `<verifier-credential>` web component: a real credential in, real
 verification, one card out. Nine situations render correctly from genuinely
 signed fixtures.
 
-Two pull requests merged on 23 September 2026. 811 unit tests and 22 in
-Chromium; lint, typecheck and build run on every push.
+**Try it:** https://digitalcredentials.github.io/verifier-plugin/ — the demo
+page, published from `main`. Pick a situation and the card verifies a real,
+signed test credential in your browser. Every pull request also gets its own
+copy at `/verifier-plugin/pr-<number>/`, linked in a comment on the PR, so a
+change can be tried before it merges. It is taken down when the PR closes.
+
+Unit tests, browser tests, lint, typecheck and build run on every push. The
+browser tests run again against each published copy, because that is the one
+people look at.
 
 It has **not** been run inside React or the wallet yet, which is the point of
 it, and no screen reader has heard it. See **Open questions**.
@@ -139,9 +146,11 @@ A first slice: a real credential in, real verification, one card out.
 | `src/verifier-credential.ts` | The `<verifier-credential>` web component |
 | `src/index.ts` | The public surface |
 | `test/outcomes.test.ts` | The mapping, and the ways a good credential can be made to look bad |
-| `test/consistency.test.ts` | 720 combinations asserting the headline and the breakdown can never disagree |
-| `test/browser/states.spec.ts` | 22 tests driving the component in a real browser |
+| `test/consistency.test.ts` | 1,500 combinations asserting the headline and the breakdown can never disagree |
+| `test/browser/states.spec.ts` | Drives the component in a real browser, locally or against a published copy |
 | `scripts/make-fixtures.js` | Builds the test credentials, really signed |
+| `scripts/build-site.js` | Builds the demo page for a published address, with credentials signed for it |
+| `.github/workflows/preview.yml` | Publishes `main` and each PR to GitHub Pages, then tests the published copy |
 
 ```
 npm install
@@ -149,7 +158,32 @@ npm test            # the mapping, without a browser
 npm run test:browser  # the component, in Chromium, verifying for real
 npm run dev         # look at it
 npm run fixtures    # rebuild the test credentials
+
+# the published site, built and tested locally
+npm run build:site -- http://localhost:4173/verifier-plugin/
+npx vite preview --mode site --port 4173
+PLAYWRIGHT_BASE_URL=http://localhost:4173/verifier-plugin/ npm run test:browser
 ```
+
+### The published site
+
+`.github/workflows/preview.yml` publishes `main` to
+https://digitalcredentials.github.io/verifier-plugin/ and each pull request to
+`/verifier-plugin/pr-<number>/`, comments the link on the PR, runs the browser
+tests against it, and removes it when the PR closes. Pull requests from forks,
+and from Dependabot, get no preview.
+
+It needs one setting, made once: **Settings → Pages → Deploy from a branch →
+`gh-pages`, `/ (root)`**. The first run creates that branch. Until the setting
+is on, the step that waits for the published copy gives up after ten minutes.
+
+The site's test credentials are signed fresh for its address, because a
+credential names its withdrawal list by full address. They use the same test
+issuer as `dev/fixtures`, whose key comes from a fixed seed in
+`scripts/make-fixtures.js` — so it is public, and anyone can sign as it. The
+published `fixtures/registry.json` says so in its own note. It is there to show
+what a recognised issuer looks like, and must never be configured as a real
+registry.
 
 ### Changing `src/outcomes.ts`
 
@@ -159,7 +193,7 @@ found across four reviews of the first two pull requests, and six were that —
 a clean verdict above a row reporting a problem, or a headline claiming in
 prose what the breakdown said was never checked.
 
-`test/consistency.test.ts` walks 720 combinations and asserts both: that the
+`test/consistency.test.ts` walks 1,500 combinations and asserts both: that the
 severities agree, and that no verdict claims the credential is unchanged or
 not withdrawn unless the row it rests on actually reported. Run it if you
 touch either function.
