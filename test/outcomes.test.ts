@@ -508,10 +508,15 @@ describe('the issuer name carries where it came from', () => {
       expect(identity.source).toBe('unverifiable');
 
       // We know something is wrong and not where, so marking the issuer alone
-      // would imply the other fields are fine. One caveat covers the lot.
+      // would imply the other fields are fine.
       expect(issuerMarker(identity.source)).toBeUndefined();
-      expect(contentCaveat(r)).toContain("can't confirm");
+      // The finding still leads here: nothing ran, so the credential itself is
+      // what is in question.
       expect(verdictLeads(r)).toBe(true);
+      // The blanket caveat is gone — see contentCaveat. Nothing ran, so there
+      // is no breakdown either, and the verdict carries the whole message.
+      expect(contentCaveat(r)).toBeUndefined();
+      expect(listChecks(r)).toEqual([]);
     },
   );
 });
@@ -1042,20 +1047,33 @@ describe('findings from the review of the 2.x migration', () => {
     expect(summarise(r).severity).not.toBe('success');
   });
 
-  it('caveats the content whenever the signature did not pass', async () => {
+  it('does not let the issuer row claim more than the signature supports', async () => {
     const { contentCaveat, verdictLeads } = await import('../src/outcomes.js');
-    // 1.x reached this through the fatal path. 2.x keeps running the other
-    // suites, so without this a tampered credential rendered a green issuer
-    // row and no caveat — the details presented as confirmed.
+    // A registry lookup establishes that a DID is a known issuer. Only the
+    // signature ties this credential to them. When it fails, the row has to
+    // stop reading as a confirmation — the team called this out on
+    // 29 September 2026, looking at a green "found in ..." row sitting under a
+    // banner that said nothing could be confirmed.
     const r = ok();
     set(r, tamperedSignature());
-    expect(contentCaveat(r)).toBeDefined();
-    expect(verdictLeads(r)).toBe(true);
+    const row = listChecks(r).find((c) => c.id === CHECK.registeredIssuer);
+    expect(row?.severity).toBe('unchecked');
+    expect(row?.value).toContain("can't confirm this credential came from them");
+    expect(row?.value).not.toContain('found in');
 
+    // The blanket caveat that used to carry this is gone, and the credential
+    // still leads: an unverified signature does not put the title in question
+    // the way a credential that could not be read at all does.
+    expect(contentCaveat(r)).toBeUndefined();
+    expect(verdictLeads(r)).toBe(false);
+
+    // ...and a credential whose signature did verify is unaffected.
     const fine = ok();
-    expect(contentCaveat(fine)).toBeUndefined();
-    expect(verdictLeads(fine)).toBe(false);
+    const fineRow = listChecks(fine).find((c) => c.id === CHECK.registeredIssuer);
+    expect(fineRow?.severity).toBe('success');
+    expect(fineRow?.value).toContain('found in');
   });
+
 
   it('does not assert expiry from a date nothing has vouched for', () => {
     // The signature failed for an unrelated reason and the credential says it

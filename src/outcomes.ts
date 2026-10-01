@@ -429,36 +429,57 @@ export const issuerMarker = (source: IssuerNameSource): string | undefined => {
  * Whether the finding should come before the credential.
  *
  * requirements.md §4 says the credential leads, and that is right when the
- * credential is the point. When verification stopped, the credential is
- * exactly what is in question, so the finding is the point. A deliberate
+ * credential is the point. When verification could not start, the credential
+ * is exactly what is in question, so the finding is the point. A deliberate
  * exception, and only for this case.
+ *
+ * This briefly also covered a failed signature, which swept in expiry —
+ * 2.x has no expiration check, so an expired credential fails the signature
+ * check and was having its title pushed below the verdict. An expired
+ * credential is not in question; it has simply run out.
  */
-export const verdictLeads = (r: VerificationResponse): boolean => contentUnconfirmed(r);
+export const verdictLeads = (r: VerificationResponse): boolean => stoppedEarly(r);
 
 /**
- * Nothing shown was confirmed.
+ * Whether we can stand behind the credential's contents.
  *
- * True when verification could not start, and also when the signature check
- * did not pass — a credential whose proof does not verify has content nobody
- * has vouched for, whatever else reported. 1.x reached this through the
- * fatal path; 2.x keeps running the other suites, so a tampered credential
- * would otherwise render with a green issuer row and no caveat at all.
+ * False when the signature did not pass: the registry can tell us a DID is a
+ * known issuer, but only the signature ties *this* credential to them.
  */
-const contentUnconfirmed = (r: VerificationResponse): boolean =>
-  stoppedEarly(r) || !passed(checksById(r).get(CHECK.signature));
+const contentConfirmed = (r: VerificationResponse): boolean => {
+  if (stoppedEarly(r)) return false;
+  const checks = checksById(r);
+  const signature = checks.get(CHECK.signature);
+  if (passed(signature)) return true;
+  // 2.x has no expiration check, so an expired credential fails the signature
+  // check. That is a statement about the date, not about provenance: the
+  // credential is still the issuer's, and the Dates row already says what is
+  // wrong with it. Treating it as unconfirmed put a hedge on the issuer of
+  // every expired credential, which is the same over-reach as the banner this
+  // replaced.
+  return isExpired(r, checks) && !detailMatches(signature, TAMPERED_MARKERS);
+};
 
 /**
- * One caveat for the whole of the displayed content.
+ * Deliberately nothing, and this is a decision rather than an omission.
  *
- * Verification stopped, so nothing shown was confirmed — and we cannot say
- * which field is wrong, only that we could not stand behind any of them. A
- * single line covering everything matches what we actually know; a marker per
- * field would claim knowledge we do not have.
+ * There used to be a line here — "These details are what the file says. We
+ * can't confirm any of them." — shown whenever the signature did not verify.
+ * Reviewed with the team on 29 September 2026 and removed: it contradicted
+ * the breakdown directly underneath it, where the issuer row read "found in
+ * Local Dev Registry" in green while the sentence above said nothing could be
+ * confirmed.
+ *
+ * The contradiction was really in that row. A registry lookup establishes that
+ * a DID is a known issuer; it does not establish that this credential came
+ * from them, and only the signature does that. So the doubt now sits on the
+ * row that overstated, where a reader meets it beside the claim it qualifies,
+ * rather than as a blanket disclaimer over fields that are mostly fine.
+ *
+ * Kept as a function because the component calls it and because the decision
+ * is worth finding when someone wonders where the sentence went.
  */
-export const contentCaveat = (r: VerificationResponse): string | undefined =>
-  contentUnconfirmed(r)
-    ? "These details are what the file says. We can't confirm any of them."
-    : undefined;
+export const contentCaveat = (_r: VerificationResponse): string | undefined => undefined;
 
 // ---------------------------------------------------------------------------
 // Tier A — it stopped
@@ -883,23 +904,41 @@ export const listChecks = (r: VerificationResponse): Check[] => {
   // list.
   const signature = checks.get(CHECK.signature);
   const tampered = failed(signature) && detailMatches(signature, TAMPERED_MARKERS);
+  const confirmed = contentConfirmed(r);
   rows.push({
     id: CHECK.signature,
-    label: 'Changes since issued',
+    // "Changes since issued" was written to avoid jargon and ended up not
+    // saying what it checks. Reviewed with the team on 29 September 2026:
+    // name tampering specifically, but plainly enough to put in front of
+    // someone who earned the credential. The label stays a subject rather
+    // than a claim, as every other row does.
+    label: 'Tampering',
     // Only a signature failure we could attribute to tampering says so. An
     // expired credential also fails this check, and reporting that as "the
     // signature doesn't match" would contradict the Dates row directly below.
     severity: passed(signature) ? 'success' : tampered ? 'error' : 'unchecked',
-    value: passed(signature) ? 'none' : tampered ? "the signature doesn't match" : 'not checked',
+    value: passed(signature)
+      ? 'none detected'
+      : tampered
+        ? "the signature doesn't match"
+        : 'not checked',
   });
 
   rows.push({
     id: CHECK.registeredIssuer,
     label: 'Issuer',
-    severity: issuer.source === 'registry' ? 'success' : 'unchecked',
+    // A registry match only counts as a pass while the signature holds. The
+    // registry establishes that a DID is a known issuer; the signature is what
+    // ties this credential to them, and without it "found in ..." claims more
+    // than we know. This row used to read green under a banner saying nothing
+    // could be confirmed — the team called that out on 29 September 2026, and
+    // the banner was the wrong half to keep.
+    severity: issuer.source === 'registry' && confirmed ? 'success' : 'unchecked',
     value:
-      issuer.source === 'registry'
+      issuer.source === 'registry' && confirmed
         ? `${issuer.name}, found in ${issuer.registries[0] ?? 'a registry we check'}`
+        : issuer.source === 'registry'
+          ? `${issuer.name} is listed in ${issuer.registries[0] ?? 'a registry we check'}, but we can't confirm this credential came from them`
         : issuer.registriesUnreachable
           ? `${issuer.name} — registry unreachable, so we don't know`
           : issuer.source === 'unknown'
