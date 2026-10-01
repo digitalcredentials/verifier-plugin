@@ -360,6 +360,14 @@ Some specific changes, all cheap:
   genuine — it's missing the issuer's digital seal", and asks for an official
   copy. "Digital seal" is on trial pending feedback. The word "signature"
   stays in the developer view, where it is the right one.
+- **No "registry" in front of the earner either.** Registries are what the
+  issuer list *is* to us; to the earner it is "our list of known issuers". So
+  a recognised issuer reads "Springfield College — a known issuer", an
+  unlisted one "not on our list of known issuers", and a registry that didn't
+  load "Our list of known issuers didn't load". The registry's name, and the
+  library's own wording, stay in the developer view. "Known" rather than
+  "trusted": being listed is not an endorsement, and the word shouldn't claim
+  one.
 - **Nothing that only restates the headline.** "Expired on 9 January 2026"
   says it all, so it no longer has "Its dates have run out" underneath. The
   line below a headline has to add something — a reassurance that actually
@@ -440,8 +448,8 @@ The answer to "who issued it" isn't yes or no. It's a name, plus where that
 name came from:
 
 ```
-  Springfield College        found in the DCC Registry
-  Springfield College        the credential says so; we couldn't confirm it
+  Springfield College        a known issuer
+  Springfield College        not on our list of known issuers
   did:key:z6Mkn…             no name available at all
 ```
 
@@ -458,11 +466,18 @@ little.
 
 A registry lookup establishes that an identifier belongs to a known issuer. It
 does not establish that *this* credential came from them — only the signature
-does that. So when the signature doesn't verify, the issuer row does not show a
-green "found in …". It reads:
+does that. So when the signature doesn't verify, the issuer row names nobody
+and mentions no list. It says only that we can't confirm, and why:
 
-> Springfield College is listed in Local Dev Registry, but we can't confirm
-> this credential came from them
+> can't confirm — the digital seal doesn't match
+
+(or "we couldn't check the digital seal", when the check didn't finish). This
+was "Springfield College is listed in Local Dev Registry, but we can't confirm
+this credential came from them" until James's review on 1 October 2026. He
+made two points. Nobody outside the team knows what a "Local Dev Registry" is.
+And opening with "Springfield College is listed…" lends a credential whose
+seal is broken the issuer's name, which is exactly what a forger would count
+on. The Tampering row directly above already says what went wrong.
 
 Expired credentials are the exception and keep the green row, because their
 seal did hold. verifier-core 2.x has no expiry check of its own, so an expired
@@ -483,8 +498,8 @@ reason, the suggested action says "the issuer" rather than naming them.
 This replaced a blanket caveat — "These details are what the file says. We
 can't confirm any of them." — which sat directly above a green issuer row and
 contradicted it. It was removed after the 29 September review, so the doubt
-sits on the one row that overstated, beside the claim it qualifies. The
-sentence itself is still to confirm with the team.
+sits on the one row that overstated, beside the claim it qualifies. Its
+wording was settled with James on 1 October 2026 (above).
 
 ### The issuer's full details
 
@@ -499,8 +514,8 @@ right home for the raw identifier.
 > It hasn't been tampered with, and the issuer hasn't withdrawn it.
 >
 > It says it was issued by **Springfield College**. We couldn't confirm that
-> independently — they aren't in any registry we check, which is common. It
-> doesn't mean the credential is fake.
+> independently — they aren't on our list of known issuers, which is common.
+> It doesn't mean the credential is fake.
 
 Four choices worth explaining:
 
@@ -536,8 +551,10 @@ this will happen to real people.
 
 Two things we now know, from testing on 21 September:
 
-- **The result tells us which registry failed, by name.** So this case can say
-  something specific rather than gesturing at a general problem.
+- **The result tells us which registry failed, by name.** That name is for
+  developers, so it appears in the developer view. The earner reads "Our list
+  of known issuers didn't load", because a registry's name means nothing to
+  them (James, 1 October 2026).
 - **It is distinguishable from "not listed" only if you look for it.** See the
   requirement at the end of section 4. Get this wrong and the fourth case
   silently becomes the second one.

@@ -123,6 +123,30 @@ test('the issuer name is marked when the seal did not hold', async ({ page }) =>
   }
 });
 
+test('the issuer row speaks the earner\'s language, and lends no name without the seal', async ({ page }) => {
+  const issuerRow = () =>
+    page.evaluate(() =>
+      [...document.getElementById('vc')!.shadowRoot!.querySelectorAll('.check')]
+        .map((r) => r.textContent!.replace(/\s+/g, ' ').trim())
+        .find((t) => t.startsWith('Issuer')) ?? '',
+    );
+
+  await pick(page, 'Changed');
+  const changed = await issuerRow();
+  expect(changed).toContain("can't confirm — the digital seal doesn't match");
+  expect(changed).not.toContain('Springfield College');
+  expect(changed).not.toContain('Registry');
+
+  await pick(page, 'Verified');
+  expect(await issuerRow()).toContain('Springfield College — a known issuer');
+  // The registry's own name is still there for developers, in the library's words.
+  await page.locator('#vc').getByRole('button', { name: 'Developer view', exact: true }).click();
+  const dev = await page.evaluate(
+    () => document.getElementById('vc')!.shadowRoot!.querySelector('.dev')!.textContent!,
+  );
+  expect(dev).toContain('Issuer found in registry: Local Dev Registry');
+});
+
 test('an unrecognised issuer is never called fake', async ({ page }) => {
   const c = await pick(page, 'Issuer unknown');
   expect(c.severity).not.toBe('error');
@@ -138,7 +162,9 @@ test('an unreachable registry reads differently from an unlisted issuer', async 
   // read alike, the distinction has been lost somewhere.
   expect(offline.headline).not.toBe(unknown.headline);
   expect(offline.severity).toBe('unchecked');
-  expect(offline.detail).toContain('Local Dev Registry');
+  // In the earner's terms, not the registry's name — that's in the developer view.
+  expect(offline.detail).toContain("Our list of known issuers didn't load");
+  expect(offline.detail).not.toContain('Local Dev Registry');
   expect(offline.action).not.toBe('');
 });
 

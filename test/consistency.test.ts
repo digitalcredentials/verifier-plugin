@@ -405,6 +405,21 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
     // rather than a third time for the instance.
     const claims = `${out.headline} ${out.detail}`.toLowerCase();
 
+    // The earner never reads a registry's name, or the word: to them it is
+    // "our list of known issuers" (James, 1 October 2026). Every verdict and
+    // every row, in every combination.
+    const earnerProse = [out.headline, out.detail, out.action ?? '', ...rows.map((c) => c.value)].join(' ');
+    expect(earnerProse, `${where}: names a registry to the earner`).not.toMatch(/registry|registries/i);
+
+    // When the verdict blames the list, the Issuer row has to be about the
+    // list too — not the seal. Both read "unchecked", so severities can't see
+    // the two giving different reasons.
+    if (out.code === 'registry_unreachable') {
+      expect(row(CHECK.registeredIssuer)?.value, `${where}: the verdict blames the list, the row doesn't`).toContain(
+        'list of known issuers',
+      );
+    }
+
     if (CLAIMS_UNCHANGED.test(claims)) {
       expect(
         row(CHECK.signature)?.severity,

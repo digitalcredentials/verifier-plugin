@@ -276,7 +276,11 @@ describe("the traps that make a good credential look bad", () => {
     // Both report valid: false. Only the second list tells them apart.
     expect(summarise(notListed).code).toBe('issuer_unconfirmed');
     expect(summarise(unreachable).code).toBe('registry_unreachable');
-    expect(summarise(unreachable).detail).toContain('DCC Registry');
+    // Said in the earner's terms, not the registry's name (James, 1 October
+    // 2026): the name is in the developer view.
+    expect(summarise(unreachable).detail).toContain("Our list of known issuers didn't load");
+    expect(summarise(unreachable).detail).not.toContain('DCC Registry');
+    expect(summarise(notListed).detail).toContain("aren't on our list of known issuers");
   });
 
   it('never calls an unrecognised issuer fake', () => {
@@ -978,7 +982,7 @@ describe('an unreachable registry when another one answered', () => {
   it('agrees with the row, which says the issuer was found', () => {
     const row = listChecks(matchedAndUnreachable()).find((c) => c.id === CHECK.registeredIssuer);
     expect(row!.severity).toBe('success');
-    expect(row!.value).toContain('found in');
+    expect(row!.value).toBe('Springfield College — a known issuer');
   });
 });
 
@@ -1165,8 +1169,11 @@ describe('findings from the review of the 2.x migration', () => {
     set(r, tamperedSignature());
     const row = listChecks(r).find((c) => c.id === CHECK.registeredIssuer);
     expect(row?.severity).toBe('unchecked');
-    expect(row?.value).toContain("can't confirm this credential came from them");
-    expect(row?.value).not.toContain('found in');
+    // James, reviewing #16 on 1 October 2026: without the seal, even naming
+    // the list the issuer is on lends the credential a name it hasn't earned.
+    expect(row?.value).toBe("can't confirm — the digital seal doesn't match");
+    expect(row?.value).not.toContain('Springfield College');
+    expect(row?.value).not.toMatch(/registry|known issuer/i);
 
     // The blanket caveat that used to carry this is gone, and the credential
     // still leads: an unverified signature does not put the title in question
@@ -1178,7 +1185,13 @@ describe('findings from the review of the 2.x migration', () => {
     const fine = ok();
     const fineRow = listChecks(fine).find((c) => c.id === CHECK.registeredIssuer);
     expect(fineRow?.severity).toBe('success');
-    expect(fineRow?.value).toContain('found in');
+    expect(fineRow?.value).toBe('Springfield College — a known issuer');
+
+    // A seal that never reported can't confirm either, and says why.
+    const unsigned = ok();
+    remove(unsigned, CHECK.signature);
+    const unsignedRow = listChecks(unsigned).find((c) => c.id === CHECK.registeredIssuer);
+    expect(unsignedRow?.value).toBe("can't confirm — we couldn't check the digital seal");
   });
 
 
@@ -1265,10 +1278,29 @@ describe('findings from the review of the 2.x migration', () => {
   });
 
   it('keeps a registry name that contains a period intact', () => {
+    // No earner text shows the name any more, but the identity still carries
+    // it, and reading it out of the library's prose must not cut it short.
     const r = ok();
     set(r, pass(CHECK.registeredIssuer, 'Issuer found in registry: registry.example.edu'));
-    const row = listChecks(r).find((c) => c.id === CHECK.registeredIssuer);
-    expect(row?.value).toContain('registry.example.edu');
+    expect(issuerIdentity(r).registries).toEqual(['registry.example.edu']);
+  });
+
+  it('names no registry anywhere the earner reads', () => {
+    const cases: VerificationResponse[] = [ok()];
+    const offline = ok();
+    set(
+      offline,
+      fail(CHECK.registeredIssuer, [
+        { type: PROBLEM.issuerNotRegistered, title: 'Issuer Not Registered', detail: 'Not found.' },
+        { type: PROBLEM.registryUnchecked, title: 'Registry Unchecked', detail: '1 registries could not be checked: DCC Registry' },
+      ]),
+    );
+    cases.push(offline);
+    for (const r of cases) {
+      const out = summarise(r);
+      const prose = [out.headline, out.detail, out.action ?? '', ...listChecks(r).map((c) => c.value)].join(' ');
+      expect(prose).not.toMatch(/DCC Registry|registry/i);
+    }
   });
 
   it('never says "0 of the registries" when it could not read the names', () => {

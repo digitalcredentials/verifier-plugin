@@ -865,26 +865,30 @@ export const summarise = (r: VerificationResponse): Outcome => {
   // than one registry the check passes and still reports the one it could not
   // reach, both in the same sentence. Then we do know who issued this, and
   // saying we could not confirm it would contradict the issuer row, which
-  // reads "found in ...".
+  // reads "a known issuer".
   // `unknown` covers a lookup that threw or never ran. Letting it fall
   // through to `issuer_unconfirmed` stated a negative we never tested —
-  // "they aren't in any registry we check" — which is the §5 mistake.
+  // "they aren't on our list of known issuers" — which is the §5 mistake.
+  //
+  // Only while the seal held. Without it the issuer row says the seal is
+  // the problem, not the list, and so must the headline: the seal is the
+  // more serious unknown, and it falls through to `signature_unchecked`.
   if (
+    sealHeld(checks) &&
     (issuer.registriesUnreachable || issuer.source === 'unknown') &&
     !passed(checks.get(CHECK.registeredIssuer))
   ) {
-    const which = !issuer.registriesUnreachable
-      ? "The registry check didn't complete."
-      : issuer.unreachable.length === 0
-        ? "A registry we check didn't load."
-        : issuer.unreachable.length === 1
-        ? `The ${issuer.unreachable[0]} didn't load.`
-        : `${issuer.unreachable.length} of the registries we check didn't load.`;
+    // No registry is named: the earner doesn't know what one is, and "our
+    // list of known issuers" is what it is to them. Which registry failed is
+    // in the developer view.
+    const which = issuer.registriesUnreachable
+      ? "Our list of known issuers didn't load."
+      : "We couldn't finish checking our list of known issuers.";
     return {
       severity: 'unchecked',
       code: 'registry_unreachable',
       headline: "We couldn't confirm who issued this",
-      detail: `${which} That's a problem at our end, not with your credential. This is different from the issuer not being listed — we simply don't know.`,
+      detail: `${which} That's a problem at our end, not with your credential. It doesn't mean they aren't on it — we just don't know.`,
       action: 'Try again in a moment.',
     };
   }
@@ -901,7 +905,7 @@ export const summarise = (r: VerificationResponse): Outcome => {
     const says =
       issuer.source === 'none'
         ? "It doesn't give a name for its issuer, only an identifier."
-        : `It says it was issued by ${issuer.name}. We couldn't confirm that independently — they aren't in any registry we check, which is common. It doesn't mean the credential is fake.`;
+        : `It says it was issued by ${issuer.name}. We couldn't confirm that independently — they aren't on our list of known issuers, which is common. It doesn't mean the credential is fake.`;
     return {
       severity: 'unchecked',
       code: 'issuer_unconfirmed',
@@ -978,19 +982,28 @@ export const listChecks = (r: VerificationResponse): Check[] => {
     // than we know. This row used to read green under a banner saying nothing
     // could be confirmed — the team called that out on 29 September 2026, and
     // the banner was the wrong half to keep.
+    //
+    // James Chartrand, reviewing #16 on 1 October 2026: when the seal doesn't
+    // hold, even "Springfield College is listed in ..." lends the credential a
+    // name it hasn't earned, which is what a forger would count on. So without
+    // the seal the row names nobody and mentions no list — only that we can't
+    // confirm, and why. And no row names a registry: "Local Dev Registry"
+    // means nothing to an earner. The registry's own name stays in the
+    // developer view, in the library's words.
     severity: issuer.source === 'registry' && confirmed ? 'success' : 'unchecked',
-    value:
-      issuer.source === 'registry' && confirmed
-        ? `${issuer.name}, found in ${issuer.registries[0] ?? 'a registry we check'}`
-        : issuer.source === 'registry'
-          ? `${issuer.name} is listed in ${issuer.registries[0] ?? 'a registry we check'}, but we can't confirm this credential came from them`
+    value: !confirmed
+      ? tampered
+        ? "can't confirm — the digital seal doesn't match"
+        : "can't confirm — we couldn't check the digital seal"
+      : issuer.source === 'registry'
+        ? `${issuer.name} — a known issuer`
         : issuer.registriesUnreachable
-          ? `${issuer.name} — registry unreachable, so we don't know`
+          ? `${issuer.name} — we couldn't load our list of known issuers`
           : issuer.source === 'unknown'
-            ? `${issuer.name} — the registry check didn't complete, so we don't know`
+            ? `${issuer.name} — we couldn't finish checking our list of known issuers`
           : issuer.source === 'none'
             ? 'no name given, only an identifier'
-            : `${issuer.name} — name comes from the credential; not in any registry we check`,
+            : `${issuer.name} — not on our list of known issuers`,
   });
 
   const revocation = checks.get(CHECK.status);
