@@ -25,9 +25,10 @@ jobs:
       # ubuntu-latest does not carry. Corepack takes the version from the
       # dependency's own `packageManager` field.
       #
-      # This step comes out when we move back to an npm release. It is the
-      # clearest argument for publishing `2.0.0-beta1`: every consumer of the
-      # git SHA pays this, and npm 11 flags the install script besides.
+      # This step comes out when we move back to an npm release. Host apps no
+      # longer pay it, since verifier-core is bundled into dist (see
+      # vite.config.ts), but this repo still installs it from the git SHA, and
+      # npm 11 flags the install script besides.
       - run: corepack enable
       - run: npm ci
       - run: npm run lint
@@ -47,9 +48,10 @@ jobs:
       # ubuntu-latest does not carry. Corepack takes the version from the
       # dependency's own `packageManager` field.
       #
-      # This step comes out when we move back to an npm release. It is the
-      # clearest argument for publishing `2.0.0-beta1`: every consumer of the
-      # git SHA pays this, and npm 11 flags the install script besides.
+      # This step comes out when we move back to an npm release. Host apps no
+      # longer pay it, since verifier-core is bundled into dist (see
+      # vite.config.ts), but this repo still installs it from the git SHA, and
+      # npm 11 flags the install script besides.
       - run: corepack enable
       - run: npm ci
       - run: npx playwright install --with-deps chromium
