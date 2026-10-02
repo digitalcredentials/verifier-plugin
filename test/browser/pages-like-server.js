@@ -11,7 +11,7 @@
  * wallet does with every credential.
  */
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -20,22 +20,47 @@ import { fileURLToPath } from 'node:url';
 const HOST = '127.0.0.1';
 const PORT = 5182;
 const ORIGIN = `http://${HOST}:${PORT}`;
-// One fixed folder, rewritten at every start, so runs don't pile up copies:
-// Playwright stops this server without giving it a chance to clean up.
-const out = join(tmpdir(), 'verifier-plugin-pages-like');
 
-const server = createServer((req, res) => {
+/**
+ * Every file, signed and read into memory before the server answers anything,
+ * so Playwright's readiness poll can't find it half-written, and nothing is
+ * left on disk afterwards.
+ */
+const files = (() => {
+  const out = mkdtempSync(join(tmpdir(), 'pages-like-'));
+  try {
+    // The credentials name this server's copy of the Open Badges schema, so
+    // the tests using them need no request interception. They can't use any:
+    // once a Playwright route is active, Chromium stops refusing preflighted
+    // requests across sites (checked 1 October 2026), so a route here would
+    // hide exactly the failure these tests exist to catch.
+    copyFileSync(
+      fileURLToPath(new URL('./fixtures/ob_v3p0_achievementcredential_schema.json', import.meta.url)),
+      join(out, 'schema.json'),
+    );
+    execFileSync(process.execPath, [fileURLToPath(new URL('../../scripts/make-fixtures.js', import.meta.url))], {
+      env: {
+        ...process.env,
+        FIXTURES_OUT: out,
+        FIXTURES_STATUS_LIST_URL: `${ORIGIN}/status-list.json`,
+        FIXTURES_SCHEMA_URL: `${ORIGIN}/schema.json`,
+      },
+      // Quiet unless it fails: Playwright shows only that the server never came up.
+      stdio: ['ignore', 'ignore', 'inherit'],
+    });
+    return new Map(readdirSync(out).map((name) => [`/${name}`, readFileSync(join(out, name))]));
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+})();
+
+createServer((req, res) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.writeHead(405).end();
     return;
   }
-  const name = new URL(req.url ?? '/', ORIGIN).pathname.slice(1);
-  let body;
-  try {
-    // Flat names only: nothing outside the folder we just wrote.
-    if (!/^[a-z-]+\.json$/.test(name)) throw new Error('not found');
-    body = readFileSync(join(out, name));
-  } catch {
+  const body = files.get(new URL(req.url ?? '/', ORIGIN).pathname);
+  if (!body) {
     res.writeHead(404, { 'access-control-allow-origin': '*' }).end();
     return;
   }
@@ -44,35 +69,4 @@ const server = createServer((req, res) => {
     'access-control-allow-origin': '*',
   });
   res.end(req.method === 'HEAD' ? undefined : body);
-});
-
-// The port first: a second copy that can't have it exits here, before it
-// touches the folder the running one is serving from.
-server.on('error', (error) => {
-  console.error(error.message);
-  process.exit(1);
-});
-server.listen(PORT, HOST, () => {
-  rmSync(out, { recursive: true, force: true });
-  mkdirSync(out);
-
-  // The credentials name this server's copy of the Open Badges schema, so the
-  // tests using them need no request interception. They can't use any: once a
-  // Playwright route is active, Chromium stops refusing preflighted requests
-  // across sites (checked 1 October 2026), so a route here would hide exactly
-  // the failure these tests exist to catch.
-  copyFileSync(
-    fileURLToPath(new URL('./fixtures/ob_v3p0_achievementcredential_schema.json', import.meta.url)),
-    join(out, 'schema.json'),
-  );
-  execFileSync(process.execPath, [fileURLToPath(new URL('../../scripts/make-fixtures.js', import.meta.url))], {
-    env: {
-      ...process.env,
-      FIXTURES_OUT: out,
-      FIXTURES_STATUS_LIST_URL: `${ORIGIN}/status-list.json`,
-      FIXTURES_SCHEMA_URL: `${ORIGIN}/schema.json`,
-    },
-    // Quiet unless it fails: Playwright shows only that the server never came up.
-    stdio: ['ignore', 'ignore', 'inherit'],
-  });
-});
+}).listen(PORT, HOST);

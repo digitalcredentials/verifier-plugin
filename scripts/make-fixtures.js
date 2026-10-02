@@ -10,7 +10,7 @@
  *
  * The published demo site needs its own set, because a credential names its
  * withdrawal list by full address and the published site lives somewhere
- * else. scripts/build-site.js runs this with both settings below.
+ * else. scripts/build-site.js runs this with all three settings below.
  *
  *   FIXTURES_STATUS_LIST_URL  where the withdrawal list will be served
  *   FIXTURES_OUT              the folder to write into

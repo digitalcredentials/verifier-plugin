@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { test, expect, type Page } from '@playwright/test';
+import { CHECK, PROBLEM } from '../../src/types.js';
 
 /**
  * Drives the real component against really-signed credentials, in a real
@@ -36,22 +37,26 @@ const card = (page: Page) =>
  * download SCHEMA over the copy. Any other request to that host is refused
  * and fails the test, so a new dependency on it shows up straight away
  * rather than as a slow run. Nate plans to drop this schema check from
- * verifier-core; once it is gone, delete the copy, this route, and its other
- * use in pages-like-server.js.
+ * verifier-core; once it is gone, delete the copy and this route, and the
+ * schema plumbing for the cross-site tests below: its copy in
+ * pages-like-server.js, FIXTURES_SCHEMA_URL in scripts/make-fixtures.js, and
+ * its empty override in scripts/build-site.js.
  */
 const SCHEMA = 'https://purl.imsglobal.org/spec/ob/v3p0/schema/json/ob_v3p0_achievementcredential_schema.json';
 const SCHEMA_COPY = fileURLToPath(new URL('./fixtures/ob_v3p0_achievementcredential_schema.json', import.meta.url));
-const stray: string[] = [];
+/** Every request to purl.imsglobal.org, seen by listening, which (unlike a route) changes nothing. */
+const purl: string[] = [];
 
 test.beforeEach(async ({ page }) => {
-  stray.length = 0;
-  await page.route('https://purl.imsglobal.org/**', (route) => {
-    if (route.request().url() === SCHEMA) {
-      return route.fulfill({ path: SCHEMA_COPY, headers: { 'access-control-allow-origin': '*' } });
-    }
-    stray.push(route.request().url());
-    return route.abort('blockedbyclient');
+  purl.length = 0;
+  page.on('request', (r) => {
+    if (new URL(r.url()).hostname === 'purl.imsglobal.org') purl.push(r.url());
   });
+  await page.route('https://purl.imsglobal.org/**', (route) =>
+    route.request().url() === SCHEMA
+      ? route.fulfill({ path: SCHEMA_COPY, headers: { 'access-control-allow-origin': '*' } })
+      : route.abort('blockedbyclient'),
+  );
   await page.addInitScript(() => {
     window.__done = 0;
     document.addEventListener('verification-complete', () => (window.__done as number)++);
@@ -64,7 +69,10 @@ test.beforeEach(async ({ page }) => {
 });
 
 test.afterEach(() => {
-  expect(stray, 'requests to purl.imsglobal.org other than the schema').toEqual([]);
+  expect(
+    purl.filter((url) => url !== SCHEMA),
+    'requests to purl.imsglobal.org other than the schema',
+  ).toEqual([]);
 });
 
 const pick = async (page: Page, label: string) => {
@@ -357,25 +365,23 @@ test.describe('lifecycle, from review', () => {
  * refuses the CORS preflight that a fetch with custom headers triggers. These
  * credentials come from pages-like-server.js on 127.0.0.1:5182 and name its
  * own list, so the card on localhost:5180 has to read that list across sites.
- * Local runs only: a published page is https, and cannot reach a server on
- * this machine.
+ * Local runs only: against a published copy, playwright.config.ts starts no
+ * local servers, so there is no second site to fetch from.
  */
 test.describe('a withdrawal list on another site', () => {
   test.skip(!!process.env.PLAYWRIGHT_BASE_URL, 'needs the local second site');
 
   const OTHER_SITE = 'http://127.0.0.1:5182';
-  const purl: string[] = [];
 
   // Any active Playwright route stops Chromium refusing preflighted requests
   // across sites, so the schema route above has to go. These credentials name
   // the other site's copy of the schema instead, and listening (unlike
   // routing) leaves the browser's rules alone.
+  // Unrouted, nothing stops a schema fetch from reaching purl, so here even
+  // that one counts: these credentials name the other site's copy.
   test.beforeEach(async ({ page }) => {
     await page.unroute('https://purl.imsglobal.org/**');
     purl.length = 0;
-    page.on('request', (r) => {
-      if (new URL(r.url()).hostname === 'purl.imsglobal.org') purl.push(r.url());
-    });
   });
 
   test.afterEach(() => {
@@ -386,7 +392,7 @@ test.describe('a withdrawal list on another site', () => {
   const fromOtherSite = async (page: Page, file: string) => {
     let found = { seal: '', status: '' };
     await settle(page, async () => {
-      found = await page.evaluate(async (url) => {
+      found = await page.evaluate(async ({ url, ids }) => {
         const el = document.getElementById('vc') as HTMLElement & { credential?: unknown; registries?: unknown };
         const done = new Promise<{ seal: string; status: string }>((resolve) => {
           // Failed as well as complete, or a run that throws hangs to the
@@ -400,17 +406,16 @@ test.describe('a withdrawal list on another site', () => {
             'verification-complete',
             (e) => {
               const results = (e as CustomEvent).detail.response.results as {
-                check: string;
-                outcome: { status: string; problems?: { type: string }[] };
+                id?: string;
+                outcome: { status: string; problems?: { type?: string }[] };
               }[];
-              // The problem's name too: "failure" alone is also what an
+              // The problem's type too: "failure" alone is also what an
               // unreachable list gives.
               const of = (id: string) => {
-                const o = results.find((r) => r.check === id)?.outcome;
-                const problem = o?.problems?.[0]?.type.split('#')[1];
-                return o ? [o.status, problem].filter(Boolean).join(': ') : 'absent';
+                const o = results.find((r) => r.id === id)?.outcome;
+                return o ? [o.status, o.problems?.[0]?.type].filter(Boolean).join(': ') : 'absent';
               };
-              resolve({ seal: of('proof.signature'), status: of('status.bitstring') });
+              resolve({ seal: of(ids.seal), status: of(ids.status) });
             },
             { once: true },
           );
@@ -423,7 +428,7 @@ test.describe('a withdrawal list on another site', () => {
         ];
         el.credential = credential;
         return done;
-      }, `${OTHER_SITE}/${file}.json`);
+      }, { url: `${OTHER_SITE}/${file}.json`, ids: { seal: CHECK.signature, status: CHECK.status } });
     });
     return { ...found, card: await card(page) };
   };
@@ -445,7 +450,7 @@ test.describe('a withdrawal list on another site', () => {
     // The seal too: a credential that fails it is an error anyway, and would
     // pass the rest of this for the wrong reason.
     expect(seal).toBe('success');
-    expect(status).toBe('failure: CREDENTIAL_REVOKED_OR_SUSPENDED');
+    expect(status).toBe(`failure: ${PROBLEM.revoked}`);
     expect(c.severity).toBe('error');
     expect(c.action).toContain('new copy');
   });
