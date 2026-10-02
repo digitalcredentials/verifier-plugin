@@ -69,6 +69,16 @@ browser and run in headless Chromium against two test credentials:
 | `did:key` credential, no status list | Verified, ~0.9s |
 | `did:web` credential, with status list | Signature verified, ~1.6s |
 
+**Update, 1 October 2026: the status-list problem below is fixed, and
+tested.** It was a 1.x problem. 2.x fetches with a bare `fetch(url)`, so
+nothing is preflighted, and a page on localhost reads the withdrawal lists on
+GitHub Pages correctly. The browser tests cover it against a second local
+server that refuses preflights the way GitHub Pages does
+(`test/browser/pages-like-server.js`). Separately, the tests now serve a copy
+of the Open Badges schema instead of fetching it, after one request took 52
+seconds. The rest of this section is the 21 September record of 1.x, kept as
+it was: it no longer describes how things stand.
+
 **One real problem: fetching a status list fails in the browser.** The request
 triggers a CORS preflight, and GitHub Pages answers `OPTIONS` with a 405, so
 the check never completes. A plain `GET` to the same URL returns
@@ -229,9 +239,10 @@ The dev page covers every state the design has to handle:
 | No signature | nothing to check |
 
 The status list and the dev registry are served by the dev server on the same
-origin as the page. They have to be — fetching a status list cross-origin fails
-in a browser today, so this is the only way to exercise the withdrawn state at
-all until that's fixed upstream.
+origin as the page, so the demo's withdrawn states behave predictably. The
+browser tests also check a withdrawal list on another site, as a wallet meets
+it: `test/browser/pages-like-server.js` signs its own credentials pointing at
+itself, and refuses preflights the way GitHub Pages does.
 
 ## Open questions
 

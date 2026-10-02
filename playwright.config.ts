@@ -13,15 +13,26 @@ const published = raw && (raw.endsWith('/') ? raw : `${raw}/`);
 export default defineConfig({
   testDir: 'test/browser',
   use: { baseURL: published ?? 'http://localhost:5180' },
-  // The status list and the dev registry are served by the dev server, on the
-  // same origin as the page. They have to be: fetching a status list
-  // cross-origin fails in a browser today. See src/verify.ts.
+  // The demo's status list and dev registry are served by the dev server, on
+  // the same origin as the page. The second server stands in for another
+  // site, so the tests can also fetch a status list across sites, as a wallet
+  // does. See test/browser/pages-like-server.js.
   webServer: published
     ? undefined
-    : {
-        command: 'npx vite --port 5180',
-        url: 'http://localhost:5180',
-        reuseExistingServer: true,
-        timeout: 60_000,
-      },
+    : [
+        {
+          command: 'npx vite --port 5180',
+          url: 'http://localhost:5180',
+          reuseExistingServer: true,
+          timeout: 60_000,
+        },
+        {
+          command: 'node test/browser/pages-like-server.js',
+          url: 'http://127.0.0.1:5182/status-list.json',
+          // Never someone else's: a stray server on 5182 should fail the
+          // run, not quietly answer for this one.
+          reuseExistingServer: false,
+          timeout: 30_000,
+        },
+      ],
 });

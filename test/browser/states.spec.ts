@@ -36,7 +36,8 @@ const card = (page: Page) =>
  * download SCHEMA over the copy. Any other request to that host is refused
  * and fails the test, so a new dependency on it shows up straight away
  * rather than as a slow run. Nate plans to drop this schema check from
- * verifier-core; once it is gone, delete the copy and this route.
+ * verifier-core; once it is gone, delete the copy, this route, and its other
+ * use in pages-like-server.js.
  */
 const SCHEMA = 'https://purl.imsglobal.org/spec/ob/v3p0/schema/json/ob_v3p0_achievementcredential_schema.json';
 const SCHEMA_COPY = fileURLToPath(new URL('./fixtures/ob_v3p0_achievementcredential_schema.json', import.meta.url));
@@ -348,5 +349,111 @@ test.describe('lifecycle, from review', () => {
     });
     expect(after.count).toBe(1);
     expect(after.text).toContain('withdrawn');
+  });
+});
+
+/**
+ * A wallet meets every withdrawal list on another site, and GitHub Pages
+ * refuses the CORS preflight that a fetch with custom headers triggers. These
+ * credentials come from pages-like-server.js on 127.0.0.1:5182 and name its
+ * own list, so the card on localhost:5180 has to read that list across sites.
+ * Local runs only: a published page is https, and cannot reach a server on
+ * this machine.
+ */
+test.describe('a withdrawal list on another site', () => {
+  test.skip(!!process.env.PLAYWRIGHT_BASE_URL, 'needs the local second site');
+
+  const OTHER_SITE = 'http://127.0.0.1:5182';
+  const purl: string[] = [];
+
+  // Any active Playwright route stops Chromium refusing preflighted requests
+  // across sites, so the schema route above has to go. These credentials name
+  // the other site's copy of the schema instead, and listening (unlike
+  // routing) leaves the browser's rules alone.
+  test.beforeEach(async ({ page }) => {
+    await page.unroute('https://purl.imsglobal.org/**');
+    purl.length = 0;
+    page.on('request', (r) => {
+      if (new URL(r.url()).hostname === 'purl.imsglobal.org') purl.push(r.url());
+    });
+  });
+
+  test.afterEach(() => {
+    expect(purl, 'requests to purl.imsglobal.org').toEqual([]);
+  });
+
+  /** Gives the card a credential from the other site; returns the library's seal and status checks. */
+  const fromOtherSite = async (page: Page, file: string) => {
+    let found = { seal: '', status: '' };
+    await settle(page, async () => {
+      found = await page.evaluate(async (url) => {
+        const el = document.getElementById('vc') as HTMLElement & { credential?: unknown; registries?: unknown };
+        const done = new Promise<{ seal: string; status: string }>((resolve) => {
+          // Failed as well as complete, or a run that throws hangs to the
+          // test timeout instead of saying why.
+          el.addEventListener(
+            'verification-failed',
+            (e) => resolve({ seal: `verification failed: ${(e as CustomEvent).detail.error}`, status: '' }),
+            { once: true },
+          );
+          el.addEventListener(
+            'verification-complete',
+            (e) => {
+              const results = (e as CustomEvent).detail.response.results as {
+                check: string;
+                outcome: { status: string; problems?: { type: string }[] };
+              }[];
+              // The problem's name too: "failure" alone is also what an
+              // unreachable list gives.
+              const of = (id: string) => {
+                const o = results.find((r) => r.check === id)?.outcome;
+                const problem = o?.problems?.[0]?.type.split('#')[1];
+                return o ? [o.status, problem].filter(Boolean).join(': ') : 'absent';
+              };
+              resolve({ seal: of('proof.signature'), status: of('status.bitstring') });
+            },
+            { once: true },
+          );
+        });
+        const credential = await (await fetch(url)).json();
+        // Both in one go: set apart, the registries alone would re-check the
+        // demo's own credential, which fetches the schema from purl.
+        el.registries = [
+          { name: 'Local Dev Registry', type: 'dcc-legacy', url: new URL('./fixtures/registry.json', location.href).href },
+        ];
+        el.credential = credential;
+        return done;
+      }, `${OTHER_SITE}/${file}.json`);
+    });
+    return { ...found, card: await card(page) };
+  };
+
+  test('the other site refuses a preflight, as GitHub Pages does', async ({ page }) => {
+    // If this stops holding, the tests below prove nothing about GitHub Pages.
+    const probe = await page.evaluate(async (url) => {
+      const plain = await fetch(url).then((r) => r.status, () => 'blocked');
+      const preflighted = await fetch(url, { headers: { 'x-probe': '1' } }).then((r) => r.status, () => 'blocked');
+      // A different host, not just a different port: ports don't make a
+      // different site, and GitHub Pages is a different site to a wallet.
+      return { plain, preflighted, otherHost: new URL(url).hostname !== location.hostname };
+    }, `${OTHER_SITE}/status-list.json`);
+    expect(probe).toEqual({ plain: 200, preflighted: 'blocked', otherHost: true });
+  });
+
+  test('a credential withdrawn on another site is still found withdrawn', async ({ page }) => {
+    const { seal, status, card: c } = await fromOtherSite(page, 'withdrawn');
+    // The seal too: a credential that fails it is an error anyway, and would
+    // pass the rest of this for the wrong reason.
+    expect(seal).toBe('success');
+    expect(status).toBe('failure: CREDENTIAL_REVOKED_OR_SUSPENDED');
+    expect(c.severity).toBe('error');
+    expect(c.action).toContain('new copy');
+  });
+
+  test('a credential not withdrawn on another site is checked and clear', async ({ page }) => {
+    const { seal, status, card: c } = await fromOtherSite(page, 'not-withdrawn');
+    expect(seal).toBe('success');
+    expect(status).toBe('success');
+    expect(c.severity).toBe('success');
   });
 });
