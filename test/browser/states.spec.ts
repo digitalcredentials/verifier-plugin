@@ -59,6 +59,12 @@ test('an expired credential is a warning, and says what to do', async ({ page })
   const c = await pick(page, 'Expired');
   expect(c.severity).toBe('warning');
   expect(c.action).not.toBe('');
+  // The headline names the date, so nothing restates it underneath. What
+  // does sit there is what reported: the seal held (the library checks dates
+  // after it), and the issuer set up no way to withdraw it.
+  expect(c.headline).toContain('Expired on');
+  expect(c.detail).toBe("It hasn't been tampered with, and the issuer hasn't withdrawn it.");
+  expect(c.detail).not.toContain('run out');
 });
 
 test('a withdrawn credential is an error and asks for a replacement', async ({ page }) => {
@@ -93,7 +99,54 @@ test('a credential built wrong is a warning, and asks nothing of the holder', as
 test('a credential with no signature says so plainly', async ({ page }) => {
   const c = await pick(page, 'No signature');
   expect(c.severity).toBe('error');
-  expect(c.headline).toContain('no signature');
+  // Said without assuming the reader knows what a signature is for.
+  expect(c.headline).toContain("can't tell if this is genuine");
+  expect(c.detail).toContain('digital seal');
+  expect(c.detail).not.toContain('signature');
+});
+
+test('the issuer name is marked when the seal did not hold', async ({ page }) => {
+  // Changed and No signature: the name at the top is only the credential's
+  // own claim, and it says so, as Issuer unknown already does.
+  for (const label of ['Changed', 'No signature']) {
+    await pick(page, label);
+    const meta = await page.evaluate(
+      () => document.getElementById('vc')!.shadowRoot!.querySelector('.meta')?.textContent ?? '',
+    );
+    expect(meta, label).toContain('Springfield College (unconfirmed)');
+  }
+  // ...and not when it held, expired or not.
+  for (const label of ['Verified', 'Expired']) {
+    await pick(page, label);
+    const meta = await page.evaluate(
+      () => document.getElementById('vc')!.shadowRoot!.querySelector('.meta')?.textContent ?? '',
+    );
+    expect(meta, label).not.toContain('unconfirmed');
+  }
+});
+
+test('the issuer row speaks the earner\'s language, and lends no name without the seal', async ({ page }) => {
+  const issuerRow = () =>
+    page.evaluate(() =>
+      [...document.getElementById('vc')!.shadowRoot!.querySelectorAll('.check')]
+        .map((r) => r.textContent!.replace(/\s+/g, ' ').trim())
+        .find((t) => t.startsWith('Issuer')) ?? '',
+    );
+
+  await pick(page, 'Changed');
+  const changed = await issuerRow();
+  expect(changed).toContain("can't confirm — the digital seal doesn't match");
+  expect(changed).not.toContain('Springfield College');
+  expect(changed).not.toContain('Registry');
+
+  await pick(page, 'Verified');
+  expect(await issuerRow()).toContain('Springfield College — a known issuer');
+  // The registry's own name is still there for developers, in the library's words.
+  await page.locator('#vc').getByRole('button', { name: 'Developer view', exact: true }).click();
+  const dev = await page.evaluate(
+    () => document.getElementById('vc')!.shadowRoot!.querySelector('.dev')!.textContent!,
+  );
+  expect(dev).toContain('Issuer found in registry: Local Dev Registry');
 });
 
 test('an unrecognised issuer is never called fake', async ({ page }) => {
@@ -111,7 +164,9 @@ test('an unreachable registry reads differently from an unlisted issuer', async 
   // read alike, the distinction has been lost somewhere.
   expect(offline.headline).not.toBe(unknown.headline);
   expect(offline.severity).toBe('unchecked');
-  expect(offline.detail).toContain('Local Dev Registry');
+  // In the earner's terms, not the registry's name — that's in the developer view.
+  expect(offline.detail).toContain("Our list of known issuers didn't load");
+  expect(offline.detail).not.toContain('Local Dev Registry');
   expect(offline.action).not.toBe('');
 });
 
@@ -281,6 +336,67 @@ test.describe('the three views', () => {
     await pick(page, 'Withdrawn');
     expect(await pressedView(page)).toEqual(['Details']);
     expect((await detailRows(page)).join(' ')).toContain('withdrawn by the issuer');
+  });
+
+  /**
+   * verifier-core returns a result for everything we could find to feed it —
+   * strings, null, bad registries — so the only way to reach this state is a
+   * credential that throws when the library reads it. `toJSON` hands back a
+   * plain copy, so the JSON view can still show what was given.
+   */
+  const hostileCredential = (page: Page, thrown: 'error' | 'object') =>
+    settle(page, () =>
+      page.evaluate(async (thrown) => {
+        const plain = await (await fetch('./fixtures/verified.json')).json();
+        const credential: Record<string, unknown> = { ...plain, toJSON: () => plain };
+        Object.defineProperty(credential, 'proof', {
+          enumerable: true,
+          get() {
+            throw thrown === 'error' ? new TypeError('proof exploded') : {};
+          },
+        });
+        (document.getElementById('vc') as HTMLElement & { credential?: unknown }).credential = credential;
+      }, thrown),
+    );
+
+  test('a check that failed outright still shows the credential, and the error', async ({ page }) => {
+    await hostileCredential(page, 'error');
+    const c = await card(page);
+    expect(c.headline).toContain('couldn’t finish checking');
+    expect(await pressedView(page)).toEqual(['Details']);
+    const root = () => page.evaluate(() => {
+      const r = document.getElementById('vc')!.shadowRoot!;
+      return {
+        empty: r.querySelector('.empty')?.textContent ?? '',
+        dev: r.querySelector('.dev')?.textContent?.replace(/\s+/g, ' ').trim() ?? '',
+        json: r.querySelector('pre.json')?.textContent ?? '',
+        foot: !!r.querySelector('.foot'),
+      };
+    });
+    const details = await root();
+    expect(details.empty).toContain('Developer view shows the error');
+    // There was no check to report "just now".
+    expect(details.foot).toBe(false);
+
+    await viewButton(page, 'Developer view').click();
+    const dev = (await root()).dev;
+    expect(dev).toContain('TypeError');
+    expect(dev).toContain('proof exploded');
+    // The message, never the stack.
+    expect(dev).not.toMatch(/\bat\s+\S+\s*\(/);
+
+    await viewButton(page, 'JSON').click();
+    const given = await page.evaluate(async () => (await fetch('./fixtures/verified.json')).json());
+    expect(JSON.parse((await root()).json)).toEqual(given);
+  });
+
+  test('an error with no message says so, rather than showing nothing', async ({ page }) => {
+    await hostileCredential(page, 'object');
+    await viewButton(page, 'Developer view').click();
+    const dev = await page.evaluate(
+      () => document.getElementById('vc')!.shadowRoot!.querySelector('.dev')!.textContent!,
+    );
+    expect(dev).toContain('It gave no message.');
   });
 
   test('there are no views to switch while checking', async ({ page }) => {

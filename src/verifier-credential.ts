@@ -164,6 +164,7 @@ const styles = `
   .note, .problem-detail { margin: 2px 0 0; font: .84rem/1.45 var(--vp-font, system-ui, -apple-system, "Segoe UI", sans-serif);
                            color: var(--vp-ink-3, #6e7a8f); overflow-wrap: anywhere; }
   .problem { margin-top: 4px; padding-left: 9px; border-left: 2px solid var(--vp-bad, #9e2a2a); }
+  .problem.error { margin: 12px 14px; }
   .problem-title { margin: 0; color: var(--vp-bad, #9e2a2a); font-weight: 600; }
   .problem-type { margin: 0; font-size: .72rem; color: var(--vp-ink-3, #6e7a8f); overflow-wrap: anywhere; }
   .problem-detail { color: var(--vp-ink-2, #47536a); margin-top: 3px; }
@@ -207,6 +208,8 @@ export class VerifierCredential extends HTMLElement {
    * one's checks.
    */
   #response?: VerificationResponse;
+  /** What the library threw, when it threw instead of returning a result. */
+  #error?: unknown;
   #view: View = 'details';
   /** A credential is waiting for a run that hasn’t happened yet. */
   #pending = false;
@@ -272,6 +275,7 @@ export class VerifierCredential extends HTMLElement {
     this.#caveat = undefined;
     this.#checks = [];
     this.#response = undefined;
+    this.#error = undefined;
     this.#view = 'details';
   }
 
@@ -364,6 +368,7 @@ export class VerifierCredential extends HTMLElement {
       );
     } catch (error) {
       if (superseded()) return;
+      this.#error = error;
       this.#state = 'failed';
       this.#render();
       this.dispatchEvent(
@@ -386,7 +391,7 @@ export class VerifierCredential extends HTMLElement {
     // The issuer's name carries where it came from, right where the name is.
     // People scan and read the first thing they meet, so a caveat that only
     // appears further down is a caveat many people never see.
-    const marker = this.#issuer ? issuerMarker(this.#issuer.source) : undefined;
+    const marker = this.#issuer ? issuerMarker(this.#issuer.source, this.#issuer.sealHeld) : undefined;
     const issuerName = this.#issuer?.name ?? summary.issuerName;
     const named = issuerName ? `${issuerName}${marker ? ` (${marker})` : ''}` : undefined;
     const meta = [named, issued].filter(Boolean).join(' · ');
@@ -409,11 +414,15 @@ export class VerifierCredential extends HTMLElement {
   }
 
   /**
-   * The views and the footer belong only to a finished check. While one is
-   * running there is nothing to show in them, and after one failed outright
-   * there is no result for the developer view and no "just now" to report.
+   * The views belong to a check that ended, however it ended. While one is
+   * running there is nothing to show in them.
+   *
+   * A check that failed outright still gets all three: that is when a
+   * developer most needs to see what went in, and the card keeps one shape.
+   * It gets no footer, though — there is no "checked just now" to report.
    */
   #foot(): string {
+    if (this.#state === 'failed') return this.#viewsHtml();
     if (this.#state !== 'done') return '';
     return `${this.#viewsHtml()}
       <div class="foot"><span>Checked just now</span></div>`;
@@ -430,7 +439,8 @@ export class VerifierCredential extends HTMLElement {
       return 'We couldn’t finish checking this credential.';
     }
     const o = this.#outcome;
-    return `${announce(o.severity, o.headline)} ${o.detail}`;
+    // An expired credential's headline says it all, so its detail can be empty.
+    return o.detail ? `${announce(o.severity, o.headline)} ${o.detail}` : announce(o.severity, o.headline);
   }
 
   #verdictHtml(options: { divider?: boolean } = {}): string {
@@ -464,7 +474,7 @@ export class VerifierCredential extends HTMLElement {
         <span class="glyph s-${o.severity}" aria-hidden="true">${GLYPH[o.severity]}</span>
         <div>
           <p class="headline">${spoken}${esc(o.headline)}</p>
-          <p class="detail">${esc(o.detail)}</p>
+          ${o.detail ? `<p class="detail">${esc(o.detail)}</p>` : ''}
           ${o.action ? `<p class="action">${esc(o.action)}</p>` : ''}
         </div>
       </div>
@@ -488,13 +498,22 @@ export class VerifierCredential extends HTMLElement {
   }
 
   #panelHtml(): string {
-    if (this.#view === 'developer') return this.#response ? developerHtml(this.#response) : '';
+    const failed = this.#state === 'failed';
+    if (this.#view === 'developer') {
+      if (failed) return errorHtml(this.#error);
+      return this.#response ? developerHtml(this.#response) : '';
+    }
     if (this.#view === 'json') return jsonHtml(this.#credential);
-    // Verification that stopped early has no rows to show, but the library
-    // still ran checks, and the developer view has them.
+    if (failed) {
+      return `<p class="empty">We couldn’t finish checking, so there are no details to show. ${esc(VIEWS[1].label)} shows the error.</p>`;
+    }
+    // Verification that stopped early has no rows to show — but it did not
+    // stop the library: a fatal failure ends only its own suite, and the
+    // others still run and report. So this says there is no breakdown, not
+    // that nothing was looked at, and the developer view has every check.
     return this.#checks.length
       ? `<div class="checks" id="checks">${this.#checks.map(checkHtml).join('')}</div>`
-      : `<p class="empty">Checking stopped before any of these details could be looked at. ${esc(VIEWS[1].label)} shows what was checked.</p>`;
+      : `<p class="empty">Checking stopped early, so there's no breakdown to show here. ${esc(VIEWS[1].label)} has every check that ran.</p>`;
   }
 }
 
@@ -577,6 +596,29 @@ const problemHtml = (p: ProblemDetail): string => `
     <p class="problem-type">${esc(p.type ?? '')}</p>
     ${p.detail ? `<p class="problem-detail">${esc(p.detail)}</p>` : ''}
   </div>`;
+
+/**
+ * What the library threw, in its own words: the error's name and message.
+ * Never the stack — it is long, says more about our bundle than the problem,
+ * and can carry file paths from wherever the component is hosted. Anything
+ * can be thrown, not only an Error, so a bare string is shown as the message
+ * and anything else as having none.
+ */
+const errorHtml = (error: unknown): string => {
+  const name = error instanceof Error ? error.name : '';
+  const message =
+    error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  return `
+    <div class="dev">
+      <p class="dev-bar"><b>verifyCredential</b> <span class="t-bad">threw instead of returning a result</span></p>
+      <div class="suite">
+        <div class="problem error">
+          ${name ? `<p class="problem-title">${esc(name)}</p>` : ''}
+          <p class="problem-detail">${message ? esc(message) : 'It gave no message.'}</p>
+        </div>
+      </div>
+    </div>`;
+};
 
 /**
  * The credential exactly as the host handed it over — not the verification

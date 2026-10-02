@@ -4,6 +4,62 @@ import { CHECK, PROBLEM, STATUS_LIST_PROBLEM_PREFIX } from '../src/types.js';
 import type { VerificationResponse, CheckResult } from '../src/types.js';
 
 /**
+ * How a verdict says the credential is unchanged, or not withdrawn — one list,
+ * used by every check below, so a phrasing caught in one place is caught in
+ * all of them.
+ *
+ * Broad on purpose: a reassurance reworded to echo the Tampering row ("no
+ * tampering detected") is still a reassurance. The old "changed since it was
+ * issued" phrasings stay, because a claim written the old way is still a
+ * claim. "Genuine" counts unless it is asked about — "we can't tell if this is
+ * genuine" is the opposite of a claim, and dropping the word instead would
+ * stop this seeing "Genuine, but we can't confirm who issued it".
+ */
+const CLAIMS_UNCHANGED =
+  /(?<!\b(?:if|whether) (?:this|it) is )\b(?:genuine|authentic)\b|n['’]t been (?:tampered|changed|altered|modified)|\bnot been (?:tampered|changed|altered|modified)|was(?:n['’]t| not) (?:tampered|changed|altered|modified)|\bun(?:tampered|altered|modified|changed)\b|\bintact\b|\bno tampering\b|\bnothing has changed/;
+const CLAIMS_NOT_WITHDRAWN =
+  /n['’]t been (?:withdrawn|revoked|cancelled)|n['’]t (?:withdrawn|revoked|cancelled) it|\bnot been (?:withdrawn|revoked|cancelled)|\bstill valid\b/;
+
+describe('the claim patterns themselves', () => {
+  it.each([
+    "It hasn't been tampered with, and the issuer hasn't withdrawn it.",
+    'It has not been tampered with.',
+    'No tampering detected.',
+    'It was not tampered with.',
+    'The credential is untampered.',
+    "Genuine, but we can't confirm who issued it",
+    'It looks genuine.',
+    'Nothing has changed since it was issued.',
+    "This credential hasn't been changed since it was issued.",
+    "It hasn't been altered.",
+    "It's unchanged.",
+    'It is authentic.',
+    'The credential is intact.',
+    "It hasn't been modified since it was issued.",
+  ])('reads "%s" as claiming it is unchanged', (text) => {
+    expect(text.toLowerCase()).toMatch(CLAIMS_UNCHANGED);
+  });
+
+  // Every sentence the verdicts actually use that is *not* a reassurance.
+  it.each([
+    "We can't tell if this is genuine",
+    "It's missing the issuer's digital seal — the part that proves it came from them and shows whether anyone has tampered with it.",
+    'This credential has been tampered with',
+    "Something in it was changed after it was issued. We can't tell what.",
+    "We couldn't check it for tampering. That's a problem at our end, not with your credential.",
+    'This is no longer a valid credential.',
+  ])('does not read "%s" as a claim', (text) => {
+    expect(text.toLowerCase()).not.toMatch(CLAIMS_UNCHANGED);
+    expect(text.toLowerCase()).not.toMatch(CLAIMS_NOT_WITHDRAWN);
+  });
+
+  it.each(["the issuer hasn't withdrawn it", 'It has not been withdrawn.', "It hasn't been revoked.", "It's still valid."])(
+    'reads "%s" as claiming it is not withdrawn',
+    (text) => expect(text.toLowerCase()).toMatch(CLAIMS_NOT_WITHDRAWN),
+  );
+});
+
+/**
  * The headline and the breakdown must never contradict each other.
  *
  * Both code reviews of this file found the same shape of bug: `summarise()`
@@ -349,14 +405,29 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
     // rather than a third time for the instance.
     const claims = `${out.headline} ${out.detail}`.toLowerCase();
 
-    if (/\bgenuine\b|hasn't been changed|has not been changed|nothing has changed/.test(claims)) {
+    // The earner never reads a registry's name, or the word: to them it is
+    // "our list of known issuers" (James, 1 October 2026). Every verdict and
+    // every row, in every combination.
+    const earnerProse = [out.headline, out.detail, out.action ?? '', ...rows.map((c) => c.value)].join(' ');
+    expect(earnerProse, `${where}: names a registry to the earner`).not.toMatch(/registry|registries/i);
+
+    // When the verdict blames the list, the Issuer row has to be about the
+    // list too — not the seal. Both read "unchecked", so severities can't see
+    // the two giving different reasons.
+    if (out.code === 'registry_unreachable') {
+      expect(row(CHECK.registeredIssuer)?.value, `${where}: the verdict blames the list, the row doesn't`).toContain(
+        'list of known issuers',
+      );
+    }
+
+    if (CLAIMS_UNCHANGED.test(claims)) {
       expect(
         row(CHECK.signature)?.severity,
         `${where}: claims the credential is unchanged, but the signature row says "${row(CHECK.signature)?.value}"`,
       ).toBe('success');
     }
 
-    if (/hasn't been withdrawn|hasn't withdrawn it|not been withdrawn/.test(claims)) {
+    if (CLAIMS_NOT_WITHDRAWN.test(claims)) {
       const revRow = row(CHECK.status)!;
       expect(
         revRow.severity === 'success' || !hasStatusList(r),
@@ -446,5 +517,10 @@ describe('verification that stopped early', () => {
     expect(out.detail).toBeTruthy();
     expect(out.action, `${code} offers no action`).toBeTruthy();
     expect(['error', 'unchecked']).toContain(out.severity);
+    // With no breakdown, the claim check above has no rows to hold the prose
+    // to, so hold it to nothing: a verdict that stopped here cannot reassure.
+    const claims = `${out.headline} ${out.detail}`.toLowerCase();
+    expect(claims, `${code} reassures with nothing behind it`).not.toMatch(CLAIMS_UNCHANGED);
+    expect(claims, `${code} reassures with nothing behind it`).not.toMatch(CLAIMS_NOT_WITHDRAWN);
   });
 });
