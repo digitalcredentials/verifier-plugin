@@ -22,6 +22,19 @@ const PORT = 5182;
 const ORIGIN = `http://${HOST}:${PORT}`;
 
 /**
+ * Ctrl-C or a SIGTERM during the signing below would otherwise end the process
+ * on the spot, skipping the `finally` that deletes the folder. Handled, the
+ * signal waits for the synchronous signing and clean-up, then exits. (Ctrl-C
+ * also stops the signing script, so that exits with its error instead; the
+ * clean-up still runs.) A SIGKILL can't be handled, and is Playwright's default
+ * way to stop this server, but it sends that at the end of a run, long after
+ * the folder is gone. All checked by hand on 2 October 2026.
+ */
+for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
+  process.once(signal, () => process.exit(code));
+}
+
+/**
  * Every file, signed and read into memory before the server answers anything,
  * so Playwright's readiness poll can't find it half-written, and nothing is
  * left on disk afterwards.
@@ -69,4 +82,10 @@ createServer((req, res) => {
     'access-control-allow-origin': '*',
   });
   res.end(req.method === 'HEAD' ? undefined : body);
-}).listen(PORT, HOST);
+})
+  // One line, not a stack trace, when something else already has the port.
+  .on('error', (error) => {
+    console.error(error.message);
+    process.exit(1);
+  })
+  .listen(PORT, HOST);
