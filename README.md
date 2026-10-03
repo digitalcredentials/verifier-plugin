@@ -130,8 +130,9 @@ did.
 
 In short: four severity levels that don't grow (success, warning, error, and
 "we couldn't check"), a list of messages that does grow, plain language for the
-person who earned the credential, technical detail one click away, and careful
-wording for the common case where we can't confirm who the issuer is.
+person who earned the credential, technical detail in a developer view of its
+own, and careful wording for the common case where we can't confirm who the
+issuer is.
 
 ## What's here
 
@@ -257,8 +258,8 @@ Open on the wording, and none of them are bugs:
   and on a good credential it says "as the standard expects" — a row almost
   nobody needs, on the screen almost everybody sees.
 - **Should a warning also reassure?** "This credential is missing information
-  it should have" is followed by "Nothing has changed since it was issued, and
-  the issuer hasn't withdrawn it." The breakdown already says both.
+  it should have" is followed by "It hasn't been tampered with, and the issuer
+  hasn't withdrawn it." The breakdown already says both.
 - **Does "There's nothing for you to do" reassure, or dismiss?** It comes from
   Nate's remark that most of these are not errors the holder could resolve
   themselves. It is the point of that outcome and the least settled part of

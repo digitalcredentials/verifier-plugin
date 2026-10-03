@@ -5,7 +5,7 @@
  * design can be tested without a browser:
  *
  *   summarise()  — the single line the main view shows
- *   listChecks() — the per-check breakdown behind "show details"
+ *   listChecks() — the per-check breakdown in the Details view
  *
  * The rules come from requirements.md §4 and §5 and inventory.md. Four
  * severities that never grow; a message list that does.
@@ -28,6 +28,11 @@ export interface Outcome {
   severity: Severity;
   code: string;
   headline: string;
+  /**
+   * What the headline means, or what else reported. Can be empty — nothing is
+   * written just to fill the space, so "Expired on 9 January 2026" stands alone
+   * when no reassurance reported. Draw it only when it has text.
+   */
   detail: string;
   /** Every problem names one thing to do. requirements.md §4. */
   action?: string;
@@ -71,6 +76,11 @@ export interface IssuerIdentity {
    * aren't listed", and it survives a change of wording upstream.
    */
   registriesUnreachable: boolean;
+  /**
+   * Whether the issuer's seal held, so the credential is theirs. A registry
+   * match without it names a known issuer, not this credential's.
+   */
+  sealHeld: boolean;
   id?: string;
 }
 
@@ -333,6 +343,28 @@ export const schemaFinding = (r: VerificationResponse): SchemaFinding => {
   };
 };
 
+/**
+ * Whether the issuer's seal held: nothing in the credential changed since they
+ * signed it. The one answer every row, reassurance and marker uses.
+ *
+ * More than `passed(signature)`, because 2.x has no expiration check: an
+ * expired credential *fails* the signature check. But @digitalcredentials/vc
+ * checks dates only after the proof has verified (`_verifyCredential` runs
+ * `jsigs.verify` and returns on failure, then `_checkCredential`), so a failure
+ * whose reason is the end date means the seal itself was fine. Read off the
+ * library, 30 September 2026. Tampering is excluded by its own marker, so a
+ * credential that was both altered and past its date is never called intact.
+ */
+const sealHeld = (checks: Map<string, CheckResult>): boolean => {
+  const signature = checks.get(CHECK.signature);
+  if (passed(signature)) return true;
+  return (
+    failed(signature) &&
+    detailMatches(signature, EXPIRED_MARKERS) &&
+    !detailMatches(signature, TAMPERED_MARKERS)
+  );
+};
+
 // ---------------------------------------------------------------------------
 // The issuer: a name, plus where the name came from
 // ---------------------------------------------------------------------------
@@ -343,8 +375,10 @@ export const schemaFinding = (r: VerificationResponse): SchemaFinding => {
  * are different answers that look identical if you only read `valid`.
  */
 export const issuerIdentity = (r: VerificationResponse): IssuerIdentity => {
-  const step = checksById(r).get(CHECK.registeredIssuer);
+  const checks = checksById(r);
+  const step = checks.get(CHECK.registeredIssuer);
   const nothingEstablished = stoppedEarly(r);
+  const held = !nothingEstablished && sealHeld(checks);
   const registries = registryNames(step);
   const registriesUnreachable = anyUnreachable(step);
   const unreachable = registriesUnreachable ? unreachableNames(step) : [];
@@ -370,6 +404,7 @@ export const issuerIdentity = (r: VerificationResponse): IssuerIdentity => {
       registries,
       unreachable,
       registriesUnreachable,
+      sealHeld: held,
       id,
     };
   }
@@ -380,7 +415,7 @@ export const issuerIdentity = (r: VerificationResponse): IssuerIdentity => {
       ? 'unknown'
       : 'credential';
   if (claimedName)
-    return { name: claimedName, source, registries, unreachable, registriesUnreachable, id };
+    return { name: claimedName, source, registries, unreachable, registriesUnreachable, sealHeld: held, id };
   // No name anywhere. `none` says so — but it must not swallow the fact that
   // a registry was unreachable, or the marker beside the name reads
   // "unconfirmed" while the verdict says we simply don't know.
@@ -394,6 +429,7 @@ export const issuerIdentity = (r: VerificationResponse): IssuerIdentity => {
     registries,
     unreachable,
     registriesUnreachable,
+    sealHeld: held,
     id,
   };
 };
@@ -407,19 +443,24 @@ export const issuerIdentity = (r: VerificationResponse): IssuerIdentity => {
  * registry vocabulary there would be machinery talk on the screen most people
  * see most often.
  */
-export const issuerMarker = (source: IssuerNameSource): string | undefined => {
+// `sealHeld` is required on purpose: left out, the safe answer is "unconfirmed",
+// and a default would pick the unsafe one silently.
+export const issuerMarker = (source: IssuerNameSource, sealHeld: boolean): string | undefined => {
   switch (source) {
     case 'registry':
-      return undefined;
+      // A recognised issuer needs no marker — but only while the seal holds.
+      // Without it the registry names a known issuer, not this credential's,
+      // and the Issuer row says exactly that. The name above it has to agree.
+      return sealHeld ? undefined : 'unconfirmed';
     case 'unknown':
       return 'not checked';
     case 'unverifiable':
-      // No per-field marker here, deliberately. When the signature is broken
-      // or missing we know something is wrong and not where, so marking the
-      // issuer while the title, recipient and date stand unmarked would imply
-      // the rest is fine. The whole card carries one caveat instead — see
-      // contentCaveat.
-      return undefined;
+      // This used to be unmarked, on the grounds that the whole card carried
+      // one caveat instead. That caveat was removed on 29 September 2026,
+      // which left a name nobody can vouch for looking exactly like a genuine
+      // one. Agreed with Sunny, 30 September: mark it, as an unlisted issuer
+      // already is.
+      return 'unconfirmed';
     default:
       return 'unconfirmed';
   }
@@ -446,19 +487,8 @@ export const verdictLeads = (r: VerificationResponse): boolean => stoppedEarly(r
  * False when the signature did not pass: the registry can tell us a DID is a
  * known issuer, but only the signature ties *this* credential to them.
  */
-const contentConfirmed = (r: VerificationResponse): boolean => {
-  if (stoppedEarly(r)) return false;
-  const checks = checksById(r);
-  const signature = checks.get(CHECK.signature);
-  if (passed(signature)) return true;
-  // 2.x has no expiration check, so an expired credential fails the signature
-  // check. That is a statement about the date, not about provenance: the
-  // credential is still the issuer's, and the Dates row already says what is
-  // wrong with it. Treating it as unconfirmed put a hedge on the issuer of
-  // every expired credential, which is the same over-reach as the banner this
-  // replaced.
-  return isExpired(r, checks) && !detailMatches(signature, TAMPERED_MARKERS);
-};
+const contentConfirmed = (r: VerificationResponse): boolean =>
+  !stoppedEarly(r) && sealHeld(checksById(r));
 
 /**
  * Deliberately nothing, and this is a decision rather than an omission.
@@ -543,14 +573,22 @@ const FATAL: Record<string, Omit<Outcome, 'code'>> = {
   },
   no_proof: {
     severity: 'error',
-    headline: 'This credential has no signature',
-    detail: "There's nothing to check. Anyone could have written it.",
-    action: 'Ask the issuer for a properly signed copy.',
+    // Reviewed with Sunny, 30 September 2026: an average learner doesn't know
+    // what a signature is for, so "no signature" told them nothing. The seal
+    // is the plain-language stand-in, on trial pending feedback. The action
+    // says "the issuer" rather than naming them: with no seal, the name
+    // inside is exactly the thing we can't vouch for.
+    headline: "We can't tell if this is genuine",
+    detail:
+      "It's missing the issuer's digital seal — the part that proves it came from them and shows whether anyone has tampered with it.",
+    action: 'Ask the issuer for an official copy.',
   },
   invalid_signature: {
     severity: 'error',
-    headline: 'This has been changed since it was issued',
-    detail: "We can't tell you what was changed, only that something was.",
+    // "Tampered", to match the Tampering row beneath it. The team found it
+    // clearer than "changed since it was issued", 30 September 2026.
+    headline: 'This credential has been tampered with',
+    detail: "Something in it was changed after it was issued. We can't tell what.",
     action: 'Ask the issuer for a fresh copy.',
   },
   // The two below mean we could not find out — not that anything is wrong.
@@ -594,7 +632,7 @@ const UNCHECKED_SIGNATURE: Omit<Outcome, 'code'> = {
   severity: 'unchecked',
   headline: "We couldn't finish checking this",
   detail:
-    "We couldn't confirm whether this has been changed since it was issued. That's a problem at our end, not with your credential.",
+    "We couldn't check it for tampering. That's a problem at our end, not with your credential.",
   action: 'Try again in a moment.',
 };
 
@@ -616,11 +654,11 @@ const reassurance = (
   r: VerificationResponse,
   checks: Map<string, CheckResult>,
 ): string => {
-  if (!passed(checks.get(CHECK.signature))) return '';
+  if (!sealHeld(checks)) return '';
   const notWithdrawn = !hasStatusList(r) || passed(checks.get(CHECK.status));
   return notWithdrawn
-    ? " Nothing has changed since it was issued, and the issuer hasn't withdrawn it."
-    : ' Nothing has changed since it was issued.';
+    ? " It hasn't been tampered with, and the issuer hasn't withdrawn it."
+    : " It hasn't been tampered with.";
 };
 
 /**
@@ -718,6 +756,11 @@ export const summarise = (r: VerificationResponse): Outcome => {
   // same title. Prose is the only thing the library offers to tell them apart,
   // so expiry is established from the credential's own end date — which we
   // hold — with the marker as a second route for a date we could not parse.
+  // An action names the issuer only when the seal held. Otherwise the name is
+  // the credential's own claim, which the Issuer row says we can't confirm,
+  // and telling someone to go to that name would contradict it.
+  const named = sealHeld(checks) ? issuer.name : undefined;
+
   const signatureFailed = failed(signature);
   const tampered = signatureFailed && detailMatches(signature, TAMPERED_MARKERS);
   const expired = isExpired(r, checks);
@@ -734,7 +777,7 @@ export const summarise = (r: VerificationResponse): Outcome => {
       code: 'withdrawn',
       headline: 'The issuer has withdrawn this',
       detail: 'This is no longer a valid credential.',
-      action: `A new copy must be obtained from ${issuer.name}.`,
+      action: `A new copy must be obtained from ${named ?? 'the issuer'}.`,
     };
   }
 
@@ -750,12 +793,13 @@ export const summarise = (r: VerificationResponse): Outcome => {
       severity: 'warning',
       code: 'expired',
       headline: on ? `Expired on ${on}` : 'This has passed its end date',
-      // Usually empty, because the signature check is what failed on the date
-      // and so has not reported. It is assembled rather than written out so
-      // that it appears when the checks behind it did pass, and stays absent
-      // when they did not.
-      detail: `Its dates have run out.${reassurance(r, checks)}`,
-      action: `Ask ${issuer.name} whether it can be renewed.`,
+      // Only what reported: the seal held (the library checks dates after it),
+      // so this normally says it hasn't been tampered with. It is assembled
+      // rather than written out so that it appears when the checks behind it
+      // did pass, and stays absent when they did not. Nothing fills the gap
+      // otherwise: "Its dates have run out" only restated the headline.
+      detail: reassurance(r, checks).trim(),
+      action: `Ask ${named ?? 'the issuer'} whether it can be renewed.`,
     };
   }
 
@@ -789,7 +833,7 @@ export const summarise = (r: VerificationResponse): Outcome => {
       // holds the credential could resolve themselves." Naming a task the
       // reader cannot perform is worse than naming none, so the action says
       // whose it is and releases them from it.
-      action: `${issuer.name} needs to fix how this was issued. There's nothing for you to do.`,
+      action: `${named ?? 'The issuer'} needs to fix how this was issued. There's nothing for you to do.`,
     };
   }
 
@@ -821,26 +865,30 @@ export const summarise = (r: VerificationResponse): Outcome => {
   // than one registry the check passes and still reports the one it could not
   // reach, both in the same sentence. Then we do know who issued this, and
   // saying we could not confirm it would contradict the issuer row, which
-  // reads "found in ...".
+  // reads "a known issuer".
   // `unknown` covers a lookup that threw or never ran. Letting it fall
   // through to `issuer_unconfirmed` stated a negative we never tested —
-  // "they aren't in any registry we check" — which is the §5 mistake.
+  // "they aren't on our list of known issuers" — which is the §5 mistake.
+  //
+  // Only while the seal held. Without it the issuer row says the seal is
+  // the problem, not the list, and so must the headline: the seal is the
+  // more serious unknown, and it falls through to `signature_unchecked`.
   if (
+    sealHeld(checks) &&
     (issuer.registriesUnreachable || issuer.source === 'unknown') &&
     !passed(checks.get(CHECK.registeredIssuer))
   ) {
-    const which = !issuer.registriesUnreachable
-      ? "The registry check didn't complete."
-      : issuer.unreachable.length === 0
-        ? "A registry we check didn't load."
-        : issuer.unreachable.length === 1
-        ? `The ${issuer.unreachable[0]} didn't load.`
-        : `${issuer.unreachable.length} of the registries we check didn't load.`;
+    // No registry is named: the earner doesn't know what one is, and "our
+    // list of known issuers" is what it is to them. Which registry failed is
+    // in the developer view.
+    const which = issuer.registriesUnreachable
+      ? "Our list of known issuers didn't load."
+      : "We couldn't finish checking our list of known issuers.";
     return {
       severity: 'unchecked',
       code: 'registry_unreachable',
       headline: "We couldn't confirm who issued this",
-      detail: `${which} That's a problem at our end, not with your credential. This is different from the issuer not being listed — we simply don't know.`,
+      detail: `${which} That's a problem at our end, not with your credential. It doesn't mean they aren't on it — we just don't know.`,
       action: 'Try again in a moment.',
     };
   }
@@ -857,12 +905,12 @@ export const summarise = (r: VerificationResponse): Outcome => {
     const says =
       issuer.source === 'none'
         ? "It doesn't give a name for its issuer, only an identifier."
-        : `It says it was issued by ${issuer.name}. We couldn't confirm that independently — they aren't in any registry we check, which is common. It doesn't mean the credential is fake.`;
+        : `It says it was issued by ${issuer.name}. We couldn't confirm that independently — they aren't on our list of known issuers, which is common. It doesn't mean the credential is fake.`;
     return {
       severity: 'unchecked',
       code: 'issuer_unconfirmed',
       headline: "Genuine, but we can't confirm who issued it",
-      detail: `This credential hasn't been changed since it was issued, and the issuer hasn't withdrawn it. ${says}`,
+      detail: `It hasn't been tampered with, and the issuer hasn't withdrawn it. ${says}`,
     };
   }
 
@@ -882,12 +930,12 @@ export const summarise = (r: VerificationResponse): Outcome => {
     severity: 'success',
     code: 'verified',
     headline: 'Verified',
-    detail: "Nothing has changed since it was issued, and the issuer hasn't withdrawn it.",
+    detail: "It hasn't been tampered with, and the issuer hasn't withdrawn it.",
   };
 };
 
 // ---------------------------------------------------------------------------
-// The breakdown behind "show details"
+// The breakdown in the Details view
 // ---------------------------------------------------------------------------
 
 export const listChecks = (r: VerificationResponse): Check[] => {
@@ -914,13 +962,14 @@ export const listChecks = (r: VerificationResponse): Check[] => {
     // than a claim, as every other row does.
     label: 'Tampering',
     // Only a signature failure we could attribute to tampering says so. An
-    // expired credential also fails this check, and reporting that as "the
-    // signature doesn't match" would contradict the Dates row directly below.
-    severity: passed(signature) ? 'success' : tampered ? 'error' : 'unchecked',
-    value: passed(signature)
+    // expired credential also fails this check — but only after its seal
+    // verified (see sealHeld), so it reads "none detected", not "not checked":
+    // we did check, and nothing had changed.
+    severity: sealHeld(checks) ? 'success' : tampered ? 'error' : 'unchecked',
+    value: sealHeld(checks)
       ? 'none detected'
       : tampered
-        ? "the signature doesn't match"
+        ? 'detected'
         : 'not checked',
   });
 
@@ -933,19 +982,28 @@ export const listChecks = (r: VerificationResponse): Check[] => {
     // than we know. This row used to read green under a banner saying nothing
     // could be confirmed — the team called that out on 29 September 2026, and
     // the banner was the wrong half to keep.
+    //
+    // James Chartrand, reviewing #16 on 1 October 2026: when the seal doesn't
+    // hold, even "Springfield College is listed in ..." lends the credential a
+    // name it hasn't earned, which is what a forger would count on. So without
+    // the seal the row names nobody and mentions no list — only that we can't
+    // confirm, and why. And no row names a registry: "Local Dev Registry"
+    // means nothing to an earner. The registry's own name stays in the
+    // developer view, in the library's words.
     severity: issuer.source === 'registry' && confirmed ? 'success' : 'unchecked',
-    value:
-      issuer.source === 'registry' && confirmed
-        ? `${issuer.name}, found in ${issuer.registries[0] ?? 'a registry we check'}`
-        : issuer.source === 'registry'
-          ? `${issuer.name} is listed in ${issuer.registries[0] ?? 'a registry we check'}, but we can't confirm this credential came from them`
+    value: !confirmed
+      ? tampered
+        ? "can't confirm — the digital seal doesn't match"
+        : "can't confirm — we couldn't check the digital seal"
+      : issuer.source === 'registry'
+        ? `${issuer.name} — a known issuer`
         : issuer.registriesUnreachable
-          ? `${issuer.name} — registry unreachable, so we don't know`
+          ? `${issuer.name} — we couldn't load our list of known issuers`
           : issuer.source === 'unknown'
-            ? `${issuer.name} — the registry check didn't complete, so we don't know`
+            ? `${issuer.name} — we couldn't finish checking our list of known issuers`
           : issuer.source === 'none'
             ? 'no name given, only an identifier'
-            : `${issuer.name} — name comes from the credential; not in any registry we check`,
+            : `${issuer.name} — not on our list of known issuers`,
   });
 
   const revocation = checks.get(CHECK.status);

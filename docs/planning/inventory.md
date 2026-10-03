@@ -183,5 +183,5 @@ Mapping them is mostly straightforward, with two worth arguing about:
   registry* is "we couldn't check". Same screen, different cause, and they
   must not look alike. See `requirements.md` §5.
 
-The detail view keeps all 19 distinct. The main view never shows more than
-one.
+The developer view keeps every one distinct, in the library's own words (see
+`requirements.md` §4). The verdict never shows more than one.

@@ -276,7 +276,11 @@ describe("the traps that make a good credential look bad", () => {
     // Both report valid: false. Only the second list tells them apart.
     expect(summarise(notListed).code).toBe('issuer_unconfirmed');
     expect(summarise(unreachable).code).toBe('registry_unreachable');
-    expect(summarise(unreachable).detail).toContain('DCC Registry');
+    // Said in the earner's terms, not the registry's name (James, 1 October
+    // 2026): the name is in the developer view.
+    expect(summarise(unreachable).detail).toContain("Our list of known issuers didn't load");
+    expect(summarise(unreachable).detail).not.toContain('DCC Registry');
+    expect(summarise(notListed).detail).toContain("aren't on our list of known issuers");
   });
 
   it('never calls an unrecognised issuer fake', () => {
@@ -465,17 +469,123 @@ describe('summariseCredential', () => {
   });
 });
 
+describe('what an expired credential says', () => {
+  it('says it has not been tampered with, because the seal held', () => {
+    const r = ok();
+    expire(r);
+    const out = summarise(r);
+    expect(out.code).toBe('expired');
+    expect(out.detail).toContain("It hasn't been tampered with");
+    expect(listChecks(r).find((c) => c.id === CHECK.signature)).toMatchObject({
+      severity: 'success',
+      value: 'none detected',
+    });
+  });
+
+  it('says only the part that reported, when the withdrawal list did not load', () => {
+    const r = ok();
+    expire(r);
+    set(
+      r,
+      fail(CHECK.status, [
+        {
+          type: `${STATUS_LIST_PROBLEM_PREFIX}NOT_FOUND`,
+          title: 'Status List Not Found',
+          detail: 'The status list could not be fetched.',
+        },
+      ]),
+    );
+    const out = summarise(r);
+    expect(out.code).toBe('expired');
+    expect(out.detail).toBe("It hasn't been tampered with.");
+    expect(out.detail).not.toContain('withdrawn');
+  });
+
+  it('never calls a credential untouched when the library reports tampering and expiry together', () => {
+    const r = ok();
+    expire(r);
+    // The installed library can't produce this — it checks dates only after
+    // the seal — but the rule must not depend on that staying true.
+    set(
+      r,
+      fail(
+        CHECK.signature,
+        [
+          {
+            type: PROBLEM.invalidSignature,
+            title: 'Invalid Signature',
+            detail: `Verification error(s). The current date time is after "validUntil" (${PAST}).`,
+          },
+        ],
+        true,
+      ),
+    );
+    expect(summarise(r).code).toBe('invalid_signature');
+    expect(listChecks(r).find((c) => c.id === CHECK.signature)).toMatchObject({
+      severity: 'error',
+      value: 'detected',
+    });
+    expect(issuerIdentity(r).sealHeld).toBe(false);
+  });
+});
+
+describe('an action names the issuer only when the seal held', () => {
+  const revoke = (r: VerificationResponse) =>
+    set(
+      r,
+      fail(CHECK.status, [
+        { type: PROBLEM.revoked, title: 'Credential Revoked or Suspended', detail: 'Revoked.' },
+      ]),
+    );
+
+  it('names them when it did', () => {
+    const r = ok();
+    revoke(r);
+    expect(summarise(r).action).toBe('A new copy must be obtained from Springfield College.');
+  });
+
+  it('says "the issuer" when the seal never reported', () => {
+    const r = ok();
+    revoke(r);
+    remove(r, CHECK.signature);
+    const out = summarise(r);
+    expect(out.code).toBe('withdrawn');
+    expect(out.action).toBe('A new copy must be obtained from the issuer.');
+  });
+});
+
 describe('the issuer name carries where it came from', () => {
   it('shows no marker when a registry recognised them', async () => {
     const { issuerMarker } = await import('../src/outcomes.js');
-    expect(issuerMarker(issuerIdentity(ok()).source)).toBeUndefined();
+    expect(issuerMarker(issuerIdentity(ok()).source, issuerIdentity(ok()).sealHeld)).toBeUndefined();
+  });
+
+  it('marks a recognised issuer when the seal did not hold', async () => {
+    const { issuerMarker } = await import('../src/outcomes.js');
+    const r = ok();
+    set(r, tamperedSignature());
+    const identity = issuerIdentity(r);
+    // The registry knows the issuer; only the seal ties this credential to
+    // them, and the Issuer row says so. The name above it has to agree.
+    expect(identity.source).toBe('registry');
+    expect(identity.sealHeld).toBe(false);
+    expect(issuerMarker(identity.source, identity.sealHeld)).toBe('unconfirmed');
+  });
+
+  it('leaves an expired credential’s recognised issuer unmarked — its seal held', async () => {
+    const { issuerMarker } = await import('../src/outcomes.js');
+    const r = ok();
+    expire(r);
+    const identity = issuerIdentity(r);
+    expect(identity.sealHeld).toBe(true);
+    expect(issuerMarker(identity.source, identity.sealHeld)).toBeUndefined();
   });
 
   it('marks a name that only the credential vouches for', async () => {
     const { issuerMarker } = await import('../src/outcomes.js');
     const r = ok();
     set(r, notRegistered());
-    expect(issuerMarker(issuerIdentity(r).source)).toBe('unconfirmed');
+    expect(issuerMarker(issuerIdentity(r).source, issuerIdentity(r).sealHeld)).toBe('unconfirmed');
   });
 
   it('marks a name we could not check, differently from one we could', async () => {
@@ -496,20 +606,21 @@ describe('the issuer name carries where it came from', () => {
         },
       ]),
     );
-    expect(issuerMarker(issuerIdentity(r).source)).toBe('not checked');
+    expect(issuerMarker(issuerIdentity(r).source, issuerIdentity(r).sealHeld)).toBe('not checked');
   });
 
   it.each(['no_proof', 'invalid_credential_id'])(
-    'marks no single field when verification stopped at %s',
+    'marks the issuer unconfirmed when verification stopped at %s',
     async (name) => {
       const { issuerMarker, contentCaveat, verdictLeads } = await import('../src/outcomes.js');
       const r = STOPPED[name as keyof typeof STOPPED]();
       const identity = issuerIdentity(r);
       expect(identity.source).toBe('unverifiable');
+      expect(identity.sealHeld).toBe(false);
 
-      // We know something is wrong and not where, so marking the issuer alone
-      // would imply the other fields are fine.
-      expect(issuerMarker(identity.source)).toBeUndefined();
+      // With the blanket caveat gone, an unmarked name here would look
+      // exactly like a genuine one. Agreed with Sunny, 30 September 2026.
+      expect(issuerMarker(identity.source, identity.sealHeld)).toBe('unconfirmed');
       // The finding still leads here: nothing ran, so the credential itself is
       // what is in question.
       expect(verdictLeads(r)).toBe(true);
@@ -813,7 +924,7 @@ describe('the reassurance beside a finding never outruns the checks', () => {
 
   it('claims both only when both actually reported', () => {
     const detail = summarise(withSchema(missingProperty)).detail;
-    expect(detail).toContain('Nothing has changed since it was issued');
+    expect(detail).toContain("It hasn't been tampered with");
     expect(detail).toContain("issuer hasn't withdrawn it");
   });
 
@@ -832,7 +943,7 @@ describe('the reassurance beside a finding never outruns the checks', () => {
     });
     expect(summarise(r).detail).not.toContain('withdrawn');
     // ...but the part that did report is still said.
-    expect(summarise(r).detail).toContain('Nothing has changed since it was issued');
+    expect(summarise(r).detail).toContain("It hasn't been tampered with");
   });
 
   it('claims nothing about the signature when the signature never reported', () => {
@@ -840,7 +951,7 @@ describe('the reassurance beside a finding never outruns the checks', () => {
       remove(x, CHECK.signature);
     });
     const detail = summarise(r).detail;
-    expect(detail).not.toContain('Nothing has changed');
+    expect(detail).not.toContain('tampered');
     expect(detail).not.toContain('withdrawn');
     expect(detail).toContain('leaves out details');
   });
@@ -871,7 +982,7 @@ describe('an unreachable registry when another one answered', () => {
   it('agrees with the row, which says the issuer was found', () => {
     const row = listChecks(matchedAndUnreachable()).find((c) => c.id === CHECK.registeredIssuer);
     expect(row!.severity).toBe('success');
-    expect(row!.value).toContain('found in');
+    expect(row!.value).toBe('Springfield College — a known issuer');
   });
 });
 
@@ -950,7 +1061,7 @@ describe('the marker beside the issuer name agrees with the verdict', () => {
     );
     const id = issuerIdentity(r);
     expect(id.source).toBe('unknown');
-    expect(issuerMarker(id.source)).toBe('not checked');
+    expect(issuerMarker(id.source, id.sealHeld)).toBe('not checked');
     expect(summarise(r).code).toBe('registry_unreachable');
   });
 
@@ -960,7 +1071,7 @@ describe('the marker beside the issuer name agrees with the verdict', () => {
     set(r, notRegistered());
     const id = issuerIdentity(r);
     expect(id.source).toBe('none');
-    expect(issuerMarker(id.source)).toBe('unconfirmed');
+    expect(issuerMarker(id.source, id.sealHeld)).toBe('unconfirmed');
   });
 });
 
@@ -1058,8 +1169,11 @@ describe('findings from the review of the 2.x migration', () => {
     set(r, tamperedSignature());
     const row = listChecks(r).find((c) => c.id === CHECK.registeredIssuer);
     expect(row?.severity).toBe('unchecked');
-    expect(row?.value).toContain("can't confirm this credential came from them");
-    expect(row?.value).not.toContain('found in');
+    // James, reviewing #16 on 1 October 2026: without the seal, even naming
+    // the list the issuer is on lends the credential a name it hasn't earned.
+    expect(row?.value).toBe("can't confirm — the digital seal doesn't match");
+    expect(row?.value).not.toContain('Springfield College');
+    expect(row?.value).not.toMatch(/registry|known issuer/i);
 
     // The blanket caveat that used to carry this is gone, and the credential
     // still leads: an unverified signature does not put the title in question
@@ -1071,7 +1185,13 @@ describe('findings from the review of the 2.x migration', () => {
     const fine = ok();
     const fineRow = listChecks(fine).find((c) => c.id === CHECK.registeredIssuer);
     expect(fineRow?.severity).toBe('success');
-    expect(fineRow?.value).toContain('found in');
+    expect(fineRow?.value).toBe('Springfield College — a known issuer');
+
+    // A seal that never reported can't confirm either, and says why.
+    const unsigned = ok();
+    remove(unsigned, CHECK.signature);
+    const unsignedRow = listChecks(unsigned).find((c) => c.id === CHECK.registeredIssuer);
+    expect(unsignedRow?.value).toBe("can't confirm — we couldn't check the digital seal");
   });
 
 
@@ -1158,10 +1278,29 @@ describe('findings from the review of the 2.x migration', () => {
   });
 
   it('keeps a registry name that contains a period intact', () => {
+    // No earner text shows the name any more, but the identity still carries
+    // it, and reading it out of the library's prose must not cut it short.
     const r = ok();
     set(r, pass(CHECK.registeredIssuer, 'Issuer found in registry: registry.example.edu'));
-    const row = listChecks(r).find((c) => c.id === CHECK.registeredIssuer);
-    expect(row?.value).toContain('registry.example.edu');
+    expect(issuerIdentity(r).registries).toEqual(['registry.example.edu']);
+  });
+
+  it('names no registry anywhere the earner reads', () => {
+    const cases: VerificationResponse[] = [ok()];
+    const offline = ok();
+    set(
+      offline,
+      fail(CHECK.registeredIssuer, [
+        { type: PROBLEM.issuerNotRegistered, title: 'Issuer Not Registered', detail: 'Not found.' },
+        { type: PROBLEM.registryUnchecked, title: 'Registry Unchecked', detail: '1 registries could not be checked: DCC Registry' },
+      ]),
+    );
+    cases.push(offline);
+    for (const r of cases) {
+      const out = summarise(r);
+      const prose = [out.headline, out.detail, out.action ?? '', ...listChecks(r).map((c) => c.value)].join(' ');
+      expect(prose).not.toMatch(/DCC Registry|registry/i);
+    }
   });
 
   it('never says "0 of the registries" when it could not read the names', () => {
