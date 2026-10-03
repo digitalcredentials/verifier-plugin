@@ -10,10 +10,12 @@
  *
  * The published demo site needs its own set, because a credential names its
  * withdrawal list by full address and the published site lives somewhere
- * else. scripts/build-site.js runs this with both settings below.
+ * else. scripts/build-site.js runs this with all three settings below.
  *
  *   FIXTURES_STATUS_LIST_URL  where the withdrawal list will be served
  *   FIXTURES_OUT              the folder to write into
+ *   FIXTURES_SCHEMA_URL       a schema for the credentials to name; unset or
+ *                             empty, they name none (see below)
  */
 
 import { writeFile, mkdir } from 'node:fs/promises';
@@ -35,11 +37,18 @@ const OUT =
  *
  * Same origin as the page on purpose, here and on the published site. A
  * status list on another site is the case a real wallet meets, and is tested
- * separately; these fixtures are for exercising the withdrawn and
+ * separately (test/browser/pages-like-server.js signs its own set, pointing at
+ * itself); these fixtures are for exercising the withdrawn and
  * not-withdrawn states predictably.
  */
 const STATUS_LIST_URL =
   process.env.FIXTURES_STATUS_LIST_URL ?? 'http://localhost:5180/fixtures/status-list.json';
+/**
+ * Unset, the credentials name no schema, and verifier-core falls back to the
+ * Open Badges schema on purl.imsglobal.org. The cross-site browser tests set
+ * it to a copy on their own server: see test/browser/pages-like-server.js.
+ */
+const SCHEMA_URL = process.env.FIXTURES_SCHEMA_URL;
 const WITHDRAWN_INDEX = 42;
 const LIST_LENGTH = 131072;
 
@@ -74,6 +83,10 @@ const baseCredential = (issuerDid, overrides = {}) => ({
       criteria: { narrative: 'Completed all coursework and the final assessment.' },
     },
   },
+  // `JsonSchema`, the VC 2.0 context's own type. The Open Badges one,
+  // 1EdTechJsonSchemaValidator2019, signs but then fails the signature check
+  // ("Safe mode validation error") under the VC 2.0 context.
+  ...(SCHEMA_URL && { credentialSchema: [{ id: SCHEMA_URL, type: 'JsonSchema' }] }),
   ...overrides.credential,
 });
 

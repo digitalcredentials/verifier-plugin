@@ -38,6 +38,9 @@ run('npx', ['vite', 'build', '--mode', 'site'], { SITE_BASE: url.pathname });
 run('node', ['scripts/make-fixtures.js'], {
   FIXTURES_OUT: join(SITE, 'fixtures'),
   FIXTURES_STATUS_LIST_URL: new URL('fixtures/status-list.json', url).href,
+  // Empty, whatever the shell has: the published credentials name no schema,
+  // like the demo's own.
+  FIXTURES_SCHEMA_URL: '',
 });
 
 const commit = process.env.GITHUB_SHA ?? execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT }).toString().trim();
