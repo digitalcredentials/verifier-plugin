@@ -1,6 +1,6 @@
 # Credential verification in the web wallet
 
-Draft for discussion — Sunny Lee, 18 September 2026. Updated 21 September 2026.
+Draft for discussion — Sunny Lee, 18 September 2026. Updated 21 and 30 September 2026.
 Companion document: `inventory.md`, which lists everything verification can
 tell us.
 
@@ -36,8 +36,10 @@ Two things follow.
 wallet they find worth opening, and a screen that reads like a diagnostic
 report is a reason to close it.
 
-**Developers matter too**, and they are well served by putting detail one
-click away rather than making everyone read it.
+**Developers matter too** — and today they are most of the people opening it,
+along with issuers. So the card has a developer view as a visible control of
+its own, not detail tucked behind a link (section 4). The earner's view is
+still what the card opens on.
 
 One limit worth stating early, because it constrains the wording throughout:
 **the wallet cannot tell anyone whether a credential will be accepted.** That
@@ -111,8 +113,8 @@ the code.** A web component sits behind a boundary, and things
 the surrounding app owns don't reach across it. It can't use the wallet's own
 navigation to link out to other screens, and it can't open the wallet's own
 dialogs. Anything this document describes as opening for more detail — the
-issuer's full details in section 5, the raw data behind the details toggle in
-section 4 — has to work inside the component itself. That is not a problem, but
+issuer's full details in section 5, the developer and JSON views in section
+4 — has to work inside the component itself. That is not a problem, but
 it does mean the interaction has to be designed for being a web component
 rather than adapted to it afterwards.
 
@@ -262,8 +264,9 @@ failure.
 
 ### A single credential
 
-The credential leads. Verification sits underneath it as a short line, with
-detail available on request.
+The credential leads. The verdict sits underneath it, and under that one
+control switches between three views of the same check. Agreed with the team
+on 29–30 September 2026.
 
 ```
   ┌────────────────────────────────────────┐
@@ -271,17 +274,67 @@ detail available on request.
   │  Sam Salmon                            │
   │  Springfield College · 12 March 2026   │
   │                                        │
-  │  ✓ Verified · checked just now         │
-  │                        Show details ⌄  │
+  │  ✓ Verified                            │
+  │    It hasn't been tampered with, and   │
+  │    the issuer hasn't withdrawn it.     │
+  │                                        │
+  │  [ Details | Developer view |  JSON  ] │
+  │  Tampering              ✓ none detected│
+  │  Issuer      ✓ Springfield College, …  │
+  │  Withdrawal · Dates · How it was built │
+  │                                        │
+  │  Checked just now                      │
   └────────────────────────────────────────┘
 ```
 
-Opening the details shows each check in plain words, with the raw data one
-step further in.
+- **Details** is what the card opens on: the earner's rows in plain words —
+  Tampering, Issuer, Withdrawal, Dates, How it was built. They are always
+  visible; there is no "Show details" any more. When checking stopped early
+  (a credential with no signature, say), there is no breakdown to show, and it
+  says so. That doesn't mean nothing was looked at: a failure ends only its own
+  group of checks, the others still run, and the developer view has every one
+  of them.
+- **Developer view** shows every check the library ran, grouped by suite
+  exactly as the library groups them: passed and skipped checks as well as
+  failures, skipped ones with their reason, fatal ones marked. Each check is
+  named by its id, under its group with the group's part dropped —
+  `proof-exists` under `cryptographic.core` — as the approved design does.
+  Human-readable labels are parked for now. Individual checks can be refined
+  case by case later.
+- **JSON** shows the credential as it was handed to the component,
+  pretty-printed. Not the verification result — the developer view already
+  shows that, group by group.
 
-What December ships behind that toggle is modest: a plain list of what was
-checked, and a way to copy the full result. The nicely grouped version can
-come later, and it depends on two unanswered questions in section 7 anyway.
+When the library throws instead of returning a result — rare; nothing we
+could feed it from outside made it do so — the card says "We couldn't finish
+checking this" and still has all three views. Details says there is nothing
+to show; the developer view shows the error's name and message, never its
+stack; JSON shows the credential. That is when a developer most needs to see
+what went in, and the card keeps one shape. Added 30 September 2026; the
+approved design did not cover this state.
+
+Why a visible control rather than a disclosure: today's readers are mostly
+developers and issuers, and hiding what they came for behind "Show details"
+served nobody. The name is not final — "Developer view" or "Advanced view" —
+and is kept in one place so changing it is a one-line edit.
+
+The verdict moves above the credential's title only when verification could
+not start at all. An expired or withdrawn credential is still recognisably the
+credential, so it keeps the usual order.
+
+**The library's words, everywhere in the developer view.** Each check's
+message, each problem's title and detail, and each group's summary sentence
+("4 of 4 checks passed", "1 of 1 check failed") appear exactly as
+verifier-core returns them. The team chose the library's summary sentences
+over a rendering of our own. Our words are for the verdict and Details; in
+the developer view we add only markers — "fatal", "skipped —", and "Not in
+any group" for a check no suite claims — and reword nothing the library said.
+
+**`verified` is narrower than it sounds.** The developer view shows it at the
+top, and it means only that no *fatal* check failed. Non-fatal checks — the
+recognition check, the registry lookup, the schema — can fail while it stays
+true, which is how a credential can be authentic and still built wrong. The
+library's own documentation says otherwise; reported on verifier-core#32.
 
 ### Words
 
@@ -290,15 +343,44 @@ Some specific changes, all cheap:
 - **"Withdrawn," not "revoked."** "Revoked" sounds far more serious than it
   often is. Say what it means: *this is no longer a valid credential, and a
   new copy must be obtained from the issuer.*
-- **"Hasn't been changed since it was issued,"** rather than "has a valid
-  signature."
+- **"Tampered with," not "changed since it was issued,"** and not "has a
+  valid signature." The team found tampering clearer (30 September 2026), so
+  the verdict and the Details row now use the same word: the Tampering row
+  reads *none detected*, *detected* or *not checked*; a verdict that reassures
+  says "it hasn't been tampered with"; and an altered credential's headline is
+  "This credential has been tampered with", with "Something in it was changed
+  after it was issued. We can't tell what." beneath it. The row label stays a
+  subject rather than a claim, like every other row. Going out to people for
+  feedback in this form.
 - **"The issuer hasn't withdrawn it,"** rather than "has not been revoked."
+  "Withdrawn" stays for now; alternatives are being put to the team.
+- **No "signature" in front of the earner.** An average learner doesn't know
+  what a signature is for, so "this credential has no signature" told them
+  nothing. A credential without one now reads "We can't tell if this is
+  genuine — it's missing the issuer's digital seal", and asks for an official
+  copy. "Digital seal" is on trial pending feedback. The word "signature"
+  stays in the developer view, where it is the right one.
+- **No "registry" in front of the earner either.** Registries are what the
+  issuer list *is* to us; to the earner it is "our list of known issuers". So
+  a recognised issuer reads "Springfield College — a known issuer", an
+  unlisted one "not on our list of known issuers", and a registry that didn't
+  load "Our list of known issuers didn't load". The registry's name, and the
+  library's own wording, stay in the developer view. "Known" rather than
+  "trusted": being listed is not an endorsement, and the word shouldn't claim
+  one.
+- **Nothing that only restates the headline.** "Expired on 9 January 2026"
+  says it all, so it no longer has "Its dates have run out" underneath. The
+  line below a headline has to add something — a reassurance that actually
+  reported, or what the finding means — and when there is nothing true to
+  add, nothing fills the gap. An expired credential normally does have
+  something: its seal held, so it reads "It hasn't been tampered with, and the
+  issuer hasn't withdrawn it." (see §5).
 - **Relative times.** "Checked 2 hours ago" rather than a full timestamp. The
   exact time can sit in the details. It must not be hover-only, since that
   leaves out keyboard, screen reader and touch users.
 
-The technical words are still right in the detail view. They're just a barrier
-on the main screen.
+The technical words are still right in the developer view. They're just a
+barrier on the main screen.
 
 ### Every problem says what to do
 
@@ -321,6 +403,15 @@ universities they may well be a procurement requirement.
 - **Colour never carries the message alone.** Red, amber and green is the
   hardest combination for the most common form of colour blindness. Always an
   icon and words as well.
+
+Both apply to every view on the card, not only Details. Switching views does
+not announce the result again, because nothing new was found; focus stays on
+the button that was pressed; and each button tells a screen reader whether its
+view is the one showing. In the developer view each check's mark is a
+different shape (✓ ✕ –), so colour is never the only signal, and a screen
+reader hears the status in words ("Passed", "Failed", "Skipped"). Sighted
+readers get a visible word only for skipped checks, as in the approved design;
+worth revisiting if the view is ever shown to earners.
 
 ---
 
@@ -357,8 +448,8 @@ The answer to "who issued it" isn't yes or no. It's a name, plus where that
 name came from:
 
 ```
-  Springfield College        found in the DCC Registry
-  Springfield College        the credential says so; we couldn't confirm it
+  Springfield College        a known issuer
+  Springfield College        not on our list of known issuers
   did:key:z6Mkn…             no name available at all
 ```
 
@@ -371,6 +462,47 @@ we know. It should appear near the issuer's name in the main view as a short
 marker, and also alongside the other checks, even though that repeats it a
 little.
 
+### When the signature doesn't hold
+
+A registry lookup establishes that an identifier belongs to a known issuer. It
+does not establish that *this* credential came from them — only the signature
+does that. So when the signature doesn't verify, the issuer row names nobody
+and mentions no list. It says only that we can't confirm, and why:
+
+> can't confirm — the digital seal doesn't match
+
+(or "we couldn't check the digital seal", when the check didn't finish). This
+was "Springfield College is listed in Local Dev Registry, but we can't confirm
+this credential came from them" until James's review on 1 October 2026. He
+made two points. Nobody outside the team knows what a "Local Dev Registry" is.
+And opening with "Springfield College is listed…" lends a credential whose
+seal is broken the issuer's name, which is exactly what a forger would count
+on. The Tampering row directly above already says what went wrong.
+
+Expired credentials are the exception and keep the green row, because their
+seal did hold. verifier-core 2.x has no expiry check of its own, so an expired
+credential shows up as a failed signature — but the library underneath checks
+the dates only *after* the seal has verified. An expiry failure therefore means
+nothing was changed: the Tampering row reads "none detected", the issuer row
+stays green, and the reassurance can be said. Only the Dates row reports a
+problem. (Established from the library's code, 30 September 2026, and pinned by
+a test that alters an expired credential and checks it reads as tampered.)
+
+**The name at the top follows the same rule.** When the seal didn't hold —
+an altered credential, or one with no seal at all — the issuer's name in the
+card's header carries "(unconfirmed)", as it already does for an issuer no
+registry lists. Otherwise the header would show a plain name directly above
+a row saying we can't confirm the credential came from them. For the same
+reason, the suggested action says "the issuer" rather than naming them.
+
+This replaced a blanket caveat — "These details are what the file says. We
+can't confirm any of them." — which sat directly above a green issuer row and
+contradicted it. It was removed after the 29 September review, so the doubt
+sits on the one row that overstated, beside the claim it qualifies. Its
+wording was settled with James on 1 October 2026 (above).
+
+### The issuer's full details
+
 There should be a way to see the issuer's full details — in Open Badges that
 often includes a name, logo, website and contact address. That is also the
 right home for the raw identifier.
@@ -379,12 +511,11 @@ right home for the raw identifier.
 
 > **ⓘ Genuine, but we can't confirm who issued it**
 >
-> This credential hasn't been changed since it was issued, and the issuer
-> hasn't withdrawn it.
+> It hasn't been tampered with, and the issuer hasn't withdrawn it.
 >
 > It says it was issued by **Springfield College**. We couldn't confirm that
-> independently — they aren't in any registry we check, which is common. It
-> doesn't mean the credential is fake.
+> independently — they aren't on our list of known issuers, which is common.
+> It doesn't mean the credential is fake.
 
 Four choices worth explaining:
 
@@ -394,9 +525,11 @@ thing and stop, so a green tick first produces exactly the false reassurance
 we're trying to avoid. "X, but Y" is how people naturally hold a fact with a
 catch, and you can't half-read it.
 
-**"Hasn't been changed since it was issued."** Not "valid," which sounds like
-we're endorsing it. Not "intact" either, which is a word about files and
-parcels and makes people wonder what might have damaged it.
+**"Hasn't been tampered with."** Not "valid," which sounds like we're
+endorsing it. Not "intact" either, which is a word about files and parcels and
+makes people wonder what might have damaged it. This was "hasn't been changed
+since it was issued" until 30 September 2026, when the Details row became
+"Tampering" and the two needed to match.
 
 **The issuer's own name, not the identifier.** Someone can't do anything with
 `did:key:z6Mkn…`. They can't look it up or contact it. They can recognise a
@@ -418,8 +551,10 @@ this will happen to real people.
 
 Two things we now know, from testing on 21 September:
 
-- **The result tells us which registry failed, by name.** So this case can say
-  something specific rather than gesturing at a general problem.
+- **The result tells us which registry failed, by name.** That name is for
+  developers, so it appears in the developer view. The earner reads "Our list
+  of known issuers didn't load", because a registry's name means nothing to
+  them (James, 1 October 2026).
 - **It is distinguishable from "not listed" only if you look for it.** See the
   requirement at the end of section 4. Get this wrong and the fourth case
   silently becomes the second one.
@@ -488,6 +623,11 @@ This is worth questioning. Those codes come from a library still in beta,
 and putting them on screen quietly turns them into something people depend on.
 Either we decide they're a stable published interface, or we show a stable
 message and keep the code in the copyable output.
+
+*Partly settled, 30 September 2026:* the developer view shows them, alongside
+the library's own wording, because that view exists to show what the library
+said. The verdict and Details still never do, so the question stands for
+everything an earner reads.
 
 ---
 
