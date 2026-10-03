@@ -23,14 +23,17 @@ const ORIGIN = `http://${HOST}:${PORT}`;
 
 /**
  * Ctrl-C or a SIGTERM during the signing below would otherwise end the process
- * on the spot, skipping the `finally` that deletes the folder. Handled, the
- * signal waits for the synchronous signing and clean-up, then exits. (Ctrl-C
- * also stops the signing script, so that exits with its error instead; the
- * clean-up still runs.) A SIGKILL can't be handled, which is why
- * playwright.config.ts stops this server with a SIGTERM: Playwright's default
- * is a SIGKILL, and Ctrl-C on `npx playwright test` reaches this server only
- * through Playwright, since it runs in its own process group. All checked by
- * hand on 2 October 2026, through Playwright as well as directly.
+ * on the spot, skipping the `finally` that deletes the folder. Handled, a
+ * signal sent to this process alone waits for the synchronous signing and
+ * clean-up, then exits. One sent to the whole process group, as Ctrl-C and
+ * Playwright's shutdown both are, also stops the signing script, so the
+ * server exits with that script's error instead; the clean-up still runs. A
+ * SIGKILL can't be handled, which is why playwright.config.ts stops this
+ * server with a SIGTERM: Playwright's default is a SIGKILL, and Ctrl-C on
+ * `npx playwright test` reaches this server only through Playwright, since it
+ * runs in its own process group. (A second Ctrl-C still makes Playwright
+ * SIGKILL it; mid-signing, that window is about a third of a second.) Checked
+ * by hand on 2 October 2026, through Playwright as well as directly.
  */
 for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
   process.once(signal, () => process.exit(code));
