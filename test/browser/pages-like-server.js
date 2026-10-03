@@ -26,9 +26,11 @@ const ORIGIN = `http://${HOST}:${PORT}`;
  * on the spot, skipping the `finally` that deletes the folder. Handled, the
  * signal waits for the synchronous signing and clean-up, then exits. (Ctrl-C
  * also stops the signing script, so that exits with its error instead; the
- * clean-up still runs.) A SIGKILL can't be handled, and is Playwright's default
- * way to stop this server, but it sends that at the end of a run, long after
- * the folder is gone. All checked by hand on 2 October 2026.
+ * clean-up still runs.) A SIGKILL can't be handled, which is why
+ * playwright.config.ts stops this server with a SIGTERM: Playwright's default
+ * is a SIGKILL, and Ctrl-C on `npx playwright test` reaches this server only
+ * through Playwright, since it runs in its own process group. All checked by
+ * hand on 2 October 2026, through Playwright as well as directly.
  */
 for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
   process.once(signal, () => process.exit(code));

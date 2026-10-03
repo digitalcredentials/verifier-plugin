@@ -33,6 +33,10 @@ export default defineConfig({
           // run, not quietly answer for this one.
           reuseExistingServer: false,
           timeout: 30_000,
+          // Not Playwright's default SIGKILL, which can't be handled: stopped
+          // mid-start, the server would leave its temp folder behind. See
+          // test/browser/pages-like-server.js.
+          gracefulShutdown: { signal: 'SIGTERM', timeout: 5_000 },
         },
       ],
 });
