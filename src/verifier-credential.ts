@@ -7,7 +7,7 @@
  *
  * It sits behind a shadow root, so it cannot use the surrounding app's router
  * or dialogs. Everything it offers has to work inside the component — which is
- * why the details are a disclosure here rather than a modal.
+ * why the three views are switched in place here rather than opened in a modal.
  *
  * Attributes
  *   (none required; set `credential` as a property)
@@ -35,7 +35,8 @@ import {
   type Outcome,
 } from './outcomes.js';
 import { summariseCredential, formatDate } from './credential.js';
-import type { VerificationResponse } from './types.js';
+import { groupChecks, checkName, type CheckGroup } from './developer.js';
+import type { CheckResult, ProblemDetail, VerificationResponse } from './types.js';
 
 const GLYPH: Record<string, string> = {
   success: '✓',
@@ -64,6 +65,34 @@ const CHECK_LABEL: Record<string, string> = {
   error: 'Problem',
   unchecked: "Couldn't check",
 };
+
+/** How a check ended, in the developer view. Marks differ in shape, not only colour. */
+const OUTCOME_MARK: Record<CheckResult['outcome']['status'], string> = {
+  success: '✓',
+  failure: '✕',
+  skipped: '–',
+};
+
+const OUTCOME_LABEL: Record<CheckResult['outcome']['status'], string> = {
+  success: 'Passed',
+  failure: 'Failed',
+  skipped: 'Skipped',
+};
+
+/**
+ * The three views of a finished check, in the order they sit on the card.
+ *
+ * Every label lives here and nowhere else. The team has not settled whether
+ * the second is "Developer view" or "Advanced view", so renaming it is meant
+ * to be a one-line change.
+ */
+const VIEWS = [
+  { id: 'details', label: 'Details' },
+  { id: 'developer', label: 'Developer view' },
+  { id: 'json', label: 'JSON' },
+] as const;
+
+type View = (typeof VIEWS)[number]['id'];
 
 const styles = `
   :host { display: block; container-type: inline-size; }
@@ -97,11 +126,50 @@ const styles = `
   .foot { display: flex; justify-content: space-between; align-items: center; gap: 12px;
           margin-top: 16px; padding-top: 13px; border-top: 1px solid var(--vp-rule, #d9dee7);
           font-size: .85rem; color: var(--vp-ink-3, #6e7a8f); }
-  button { font: inherit; font-size: .85rem; font-weight: 600; color: var(--vp-accent, #24476f);
-           background: none; border: 0; cursor: pointer; padding: 4px 0; }
-  button:hover { text-decoration: underline; }
   :focus-visible { outline: 2px solid var(--vp-accent, #24476f); outline-offset: 2px; border-radius: 3px; }
-  .checks { margin-top: 14px; padding-top: 13px; border-top: 1px dashed var(--vp-rule-strong, #bfc8d6); }
+  .views { display: flex; gap: 2px; margin-top: 18px; padding: 3px;
+           background: var(--vp-surface-2, #f7f9fb); border: 1px solid var(--vp-rule, #d9dee7); border-radius: 8px; }
+  .view { flex: 1; font: inherit; font-size: .84rem; font-weight: 500; line-height: 1.2;
+          color: var(--vp-ink-2, #47536a); background: none; border: 0; border-radius: 6px;
+          padding: 8px 6px; cursor: pointer; }
+  .view:hover { color: var(--vp-ink, #16202e); }
+  .view[aria-pressed="true"] { background: var(--vp-surface, #fff); color: var(--vp-ink, #16202e);
+                               font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+  .checks { margin-top: 14px; }
+  .empty { margin: 14px 0 0; font-size: .88rem; font-style: italic; color: var(--vp-ink-3, #6e7a8f); }
+  .dev { margin-top: 14px; font: .82rem/1.5 var(--vp-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+         border: 1px solid var(--vp-rule, #d9dee7); border-radius: 9px; overflow: hidden; }
+  .dev-bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 0;
+             padding: 10px 14px; background: var(--vp-surface-2, #f7f9fb);
+             border-bottom: 1px solid var(--vp-rule, #d9dee7); font-size: .76rem; color: var(--vp-ink-3, #6e7a8f); }
+  .dev-bar b { color: var(--vp-ink, #16202e); }
+  .t-ok { color: var(--vp-ok, #1b6e46); font-weight: 600; }
+  .t-bad { color: var(--vp-bad, #9e2a2a); font-weight: 600; }
+  .suite { border-bottom: 1px solid var(--vp-rule, #d9dee7); }
+  .suite:last-child { border-bottom: 0; }
+  .suite-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between;
+                gap: 2px 12px; margin: 0; padding: 10px 14px 6px; }
+  .suite-id { font-weight: 600; overflow-wrap: anywhere; }
+  .suite-count { font-size: .72rem; color: var(--vp-ink-3, #6e7a8f); }
+  .dev-checks { list-style: none; margin: 0; padding: 0 14px 11px 22px; }
+  .dev-check { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; padding: 4px 0; }
+  .dev-mark { font-weight: 600; }
+  .m-success { color: var(--vp-ok, #1b6e46); }
+  .m-failure { color: var(--vp-bad, #9e2a2a); }
+  .m-skipped { color: var(--vp-unk, #5e6a7c); }
+  .check-id { overflow-wrap: anywhere; }
+  .fatal { font-size: .62rem; letter-spacing: .08em; text-transform: uppercase; color: var(--vp-ink-3, #6e7a8f);
+           border: 1px solid var(--vp-rule-strong, #bfc8d6); border-radius: 3px; padding: 1px 4px;
+           margin-left: 2px; white-space: nowrap; }
+  .note, .problem-detail { margin: 2px 0 0; font: .84rem/1.45 var(--vp-font, system-ui, -apple-system, "Segoe UI", sans-serif);
+                           color: var(--vp-ink-3, #6e7a8f); overflow-wrap: anywhere; }
+  .problem { margin-top: 4px; padding-left: 9px; border-left: 2px solid var(--vp-bad, #9e2a2a); }
+  .problem.error { margin: 12px 14px; }
+  .problem-title { margin: 0; color: var(--vp-bad, #9e2a2a); font-weight: 600; }
+  .problem-type { margin: 0; font-size: .72rem; color: var(--vp-ink-3, #6e7a8f); overflow-wrap: anywhere; }
+  .problem-detail { color: var(--vp-ink-2, #47536a); margin-top: 3px; }
+  .json { margin: 0; padding: 14px; background: var(--vp-surface-2, #f7f9fb); font-size: .76rem; line-height: 1.55;
+          color: var(--vp-ink-2, #47536a); overflow: auto; max-height: 460px; white-space: pre; }
   .check { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 16px;
            padding: 7px 0; font-size: .9rem; border-bottom: 1px solid var(--vp-rule, #d9dee7); }
   @container (max-width: 380px) { .check { grid-template-columns: 1fr; } }
@@ -134,7 +202,15 @@ export class VerifierCredential extends HTMLElement {
   #verdictFirst = false;
   #caveat?: string;
   #checks: Check[] = [];
-  #detailsOpen = false;
+  /**
+   * The library's result, kept for the developer view. Cleared with
+   * everything else it produced, so a new credential never shows the last
+   * one's checks.
+   */
+  #response?: VerificationResponse;
+  /** What the library threw, when it threw instead of returning a result. */
+  #error?: unknown;
+  #view: View = 'details';
   /** A credential is waiting for a run that hasn’t happened yet. */
   #pending = false;
   /** Identifies the newest run, so a slow earlier one cannot overwrite it. */
@@ -154,6 +230,20 @@ export class VerifierCredential extends HTMLElement {
     this.#live.className = 'sr-only';
     this.#live.setAttribute('role', 'status');
     this.#root.append(style, this.#card, this.#live);
+
+    // On the card, which outlives every render, so one listener serves every
+    // set of buttons innerHTML puts inside it.
+    this.#card.addEventListener('click', (event) => {
+      const button = (event.target as Element).closest<HTMLButtonElement>('button[data-view]');
+      const view = button?.dataset['view'] as View | undefined;
+      if (!view || view === this.#view) return;
+      this.#view = view;
+      // Another view of the same result is not a new result, so it must not
+      // re-announce. Focus goes back to the button that was used, which the
+      // render has just replaced.
+      this.#render({ announce: false });
+      this.#card.querySelector<HTMLButtonElement>(`button[data-view="${view}"]`)?.focus();
+    });
   }
 
   set credential(value: Record<string, unknown> | undefined) {
@@ -184,7 +274,9 @@ export class VerifierCredential extends HTMLElement {
     this.#verdictFirst = false;
     this.#caveat = undefined;
     this.#checks = [];
-    this.#detailsOpen = false;
+    this.#response = undefined;
+    this.#error = undefined;
+    this.#view = 'details';
   }
 
   set registries(value: Registry[] | undefined) {
@@ -264,6 +356,7 @@ export class VerifierCredential extends HTMLElement {
       this.#verdictFirst = verdictLeads(response);
       this.#caveat = contentCaveat(response);
       this.#checks = listChecks(response);
+      this.#response = response;
       this.#state = 'done';
       this.#render();
       this.dispatchEvent(
@@ -275,6 +368,7 @@ export class VerifierCredential extends HTMLElement {
       );
     } catch (error) {
       if (superseded()) return;
+      this.#error = error;
       this.#state = 'failed';
       this.#render();
       this.dispatchEvent(
@@ -297,7 +391,7 @@ export class VerifierCredential extends HTMLElement {
     // The issuer's name carries where it came from, right where the name is.
     // People scan and read the first thing they meet, so a caveat that only
     // appears further down is a caveat many people never see.
-    const marker = this.#issuer ? issuerMarker(this.#issuer.source) : undefined;
+    const marker = this.#issuer ? issuerMarker(this.#issuer.source, this.#issuer.sealHeld) : undefined;
     const issuerName = this.#issuer?.name ?? summary.issuerName;
     const named = issuerName ? `${issuerName}${marker ? ` (${marker})` : ''}` : undefined;
     const meta = [named, issued].filter(Boolean).join(' · ');
@@ -317,23 +411,21 @@ export class VerifierCredential extends HTMLElement {
       : `${content}${this.#verdictHtml()}${this.#foot()}`;
 
     if (shouldAnnounce) this.#say(this.#spokenResult());
-
-    const toggle = this.#card.querySelector<HTMLButtonElement>('#toggle');
-    toggle?.addEventListener('click', () => {
-      this.#detailsOpen = !this.#detailsOpen;
-      // Opening the details is not a new result, so it must not re-announce.
-      this.#render({ announce: false });
-      this.#card.querySelector<HTMLButtonElement>('#toggle')?.focus();
-    });
   }
 
   /**
-   * The footer says when we checked, so it only belongs on a finished check.
-   * While one is running, or after one failed outright, there is no "just
-   * now" to report.
+   * The views belong to a check that ended, however it ended. While one is
+   * running there is nothing to show in them.
+   *
+   * A check that failed outright still gets all three: that is when a
+   * developer most needs to see what went in, and the card keeps one shape.
+   * It gets no footer, though — there is no "checked just now" to report.
    */
   #foot(): string {
-    return this.#state === 'done' ? this.#footHtml() : '';
+    if (this.#state === 'failed') return this.#viewsHtml();
+    if (this.#state !== 'done') return '';
+    return `${this.#viewsHtml()}
+      <div class="foot"><span>Checked just now</span></div>`;
   }
 
   /** Writes the live region, leaving the element itself in place. */
@@ -347,7 +439,8 @@ export class VerifierCredential extends HTMLElement {
       return 'We couldn’t finish checking this credential.';
     }
     const o = this.#outcome;
-    return `${announce(o.severity, o.headline)} ${o.detail}`;
+    // An expired credential's headline says it all, so its detail can be empty.
+    return o.detail ? `${announce(o.severity, o.headline)} ${o.detail}` : announce(o.severity, o.headline);
   }
 
   #verdictHtml(options: { divider?: boolean } = {}): string {
@@ -381,27 +474,46 @@ export class VerifierCredential extends HTMLElement {
         <span class="glyph s-${o.severity}" aria-hidden="true">${GLYPH[o.severity]}</span>
         <div>
           <p class="headline">${spoken}${esc(o.headline)}</p>
-          <p class="detail">${esc(o.detail)}</p>
+          ${o.detail ? `<p class="detail">${esc(o.detail)}</p>` : ''}
           ${o.action ? `<p class="action">${esc(o.action)}</p>` : ''}
         </div>
       </div>
       `;
   }
 
-  #footHtml(): string {
-    // Verification that stopped early has no per-check list to open, but it
-    // was still checked, and the card should say so.
-    const toggle = this.#checks.length
-      ? `<button id="toggle" type="button" aria-expanded="${this.#detailsOpen}" aria-controls="checks">
-           ${this.#detailsOpen ? 'Hide details' : 'Show details'}
-         </button>`
-      : '';
+  /**
+   * The three views, as a group of pressed-or-not buttons rather than an ARIA
+   * tablist: each says whether it is showing, and there is no arrow-key
+   * behaviour for a screen reader user to discover. The panel follows
+   * directly, so reading on from the button lands in what it opened.
+   */
+  #viewsHtml(): string {
+    const buttons = VIEWS.map(
+      ({ id, label }) =>
+        `<button class="view" type="button" data-view="${id}" aria-pressed="${id === this.#view}" aria-controls="panel">${esc(label)}</button>`,
+    ).join('');
     return `
-      <div class="foot">
-        <span>Checked just now</span>
-        ${toggle}
-      </div>
-      ${this.#detailsOpen ? `<div class="checks" id="checks">${this.#checks.map(checkHtml).join('')}</div>` : ''}`;
+      <div class="views" role="group" aria-label="Choose a view">${buttons}</div>
+      <div id="panel">${this.#panelHtml()}</div>`;
+  }
+
+  #panelHtml(): string {
+    const failed = this.#state === 'failed';
+    if (this.#view === 'developer') {
+      if (failed) return errorHtml(this.#error);
+      return this.#response ? developerHtml(this.#response) : '';
+    }
+    if (this.#view === 'json') return jsonHtml(this.#credential);
+    if (failed) {
+      return `<p class="empty">We couldn’t finish checking, so there are no details to show. ${esc(VIEWS[1].label)} shows the error.</p>`;
+    }
+    // Verification that stopped early has no rows to show — but it did not
+    // stop the library: a fatal failure ends only its own suite, and the
+    // others still run and report. So this says there is no breakdown, not
+    // that nothing was looked at, and the developer view has every check.
+    return this.#checks.length
+      ? `<div class="checks" id="checks">${this.#checks.map(checkHtml).join('')}</div>`
+      : `<p class="empty">Checking stopped early, so there's no breakdown to show here. ${esc(VIEWS[1].label)} has every check that ran.</p>`;
   }
 }
 
@@ -435,6 +547,99 @@ const checkHtml = (c: Check): string => `
       <span><span class="sr-only">${CHECK_LABEL[c.severity]}: </span>${esc(c.value)}</span>
     </span>
   </div>`;
+
+/**
+ * Everything the library returned, in its groups and its words: each group's
+ * summary sentence, each check's message or skip reason, each problem's title
+ * and detail. None of it is reworded — that is the point of this view.
+ */
+const developerHtml = (r: VerificationResponse): string => `
+  <div class="dev">
+    <p class="dev-bar"><b>verifyCredential</b> <span class="${r.verified ? 't-ok' : 't-bad'}">verified: ${esc(String(r.verified))}</span></p>
+    ${groupChecks(r).map(groupHtml).join('')}
+  </div>`;
+
+const groupHtml = ({ suite, checks }: CheckGroup): string => `
+  <div class="suite">
+    <p class="suite-head">
+      <span class="suite-id">${esc(suite?.id ?? 'Not in any group')}</span>
+      ${suite?.message ? `<span class="suite-count">${esc(suite.message)}</span>` : ''}
+    </p>
+    ${checks.length ? `<ul class="dev-checks">${checks.map((c) => devCheckHtml(c, suite?.id)).join('')}</ul>` : ''}
+  </div>`;
+
+/**
+ * One check. The mark is drawn and the status word is spoken, so neither the
+ * shape nor its colour carries the result alone. requirements.md §4.
+ */
+const devCheckHtml = (c: CheckResult, suiteId?: string): string => {
+  const o = c.outcome;
+  const note =
+    o.status === 'success'
+      ? o.message ? `<p class="note">${esc(o.message)}</p>` : ''
+      : o.status === 'skipped'
+        ? `<p class="note"><span aria-hidden="true">skipped — </span>${esc(o.reason ?? '')}</p>`
+        : (o.problems ?? []).map(problemHtml).join('');
+  return `
+    <li class="dev-check">
+      <span class="dev-mark m-${esc(String(o.status))}" aria-hidden="true">${OUTCOME_MARK[o.status] ?? '?'}</span>
+      <div>
+        <span class="sr-only">${OUTCOME_LABEL[o.status] ?? esc(String(o.status))}: </span><span class="check-id">${esc(checkName(c, suiteId))}</span>${c.fatal ? ' <span class="fatal">fatal</span>' : ''}
+        ${note}
+      </div>
+    </li>`;
+};
+
+const problemHtml = (p: ProblemDetail): string => `
+  <div class="problem">
+    <p class="problem-title">${esc(p.title ?? '')}</p>
+    <p class="problem-type">${esc(p.type ?? '')}</p>
+    ${p.detail ? `<p class="problem-detail">${esc(p.detail)}</p>` : ''}
+  </div>`;
+
+/**
+ * What the library threw, in its own words: the error's name and message.
+ * Never the stack — it is long, says more about our bundle than the problem,
+ * and can carry file paths from wherever the component is hosted. Anything
+ * can be thrown, not only an Error, so a bare string is shown as the message
+ * and anything else as having none.
+ */
+const errorHtml = (error: unknown): string => {
+  const name = error instanceof Error ? error.name : '';
+  const message =
+    error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  return `
+    <div class="dev">
+      <p class="dev-bar"><b>verifyCredential</b> <span class="t-bad">threw instead of returning a result</span></p>
+      <div class="suite">
+        <div class="problem error">
+          ${name ? `<p class="problem-title">${esc(name)}</p>` : ''}
+          <p class="problem-detail">${message ? esc(message) : 'It gave no message.'}</p>
+        </div>
+      </div>
+    </div>`;
+};
+
+/**
+ * The credential exactly as the host handed it over — not the verification
+ * result, which the developer view already shows group by group.
+ *
+ * A region with a tab stop, so a keyboard alone can scroll it.
+ */
+const jsonHtml = (credential: Record<string, unknown> | undefined): string => {
+  let text: string;
+  try {
+    text = JSON.stringify(credential, null, 2) ?? '';
+  } catch {
+    // A host can hand over an object JSON cannot represent: a cycle, a BigInt.
+    return `<p class="empty">This credential can't be shown as JSON.</p>`;
+  }
+  return `
+    <div class="dev">
+      <p class="dev-bar"><b>credential</b> <span>as it was passed in</span></p>
+      <pre class="json" tabindex="0" role="region" aria-label="The credential, as JSON">${esc(text)}</pre>
+    </div>`;
+};
 
 const esc = (s: string): string =>
   s.replace(/[&<>"']/g, (ch) =>
