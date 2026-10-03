@@ -26,15 +26,13 @@
     "test:browser": "playwright test",
     "fixtures": "node scripts/make-fixtures.js"
   },
-  "dependencies": {
-    "@digitalcredentials/verifier-core": "github:skybridgeskills/dcc-verifier-core#1b88d8af38a6dfcdbb313159036e1d84d098c89c"
-  },
   "devDependencies": {
     "@digitalcredentials/ed25519-signature-2020": "^6.0.0",
     "@digitalcredentials/ed25519-verification-key-2020": "^4.0.0",
     "@digitalcredentials/security-document-loader": "^6.0.0",
     "@digitalcredentials/vc": "^9.0.1",
     "@digitalcredentials/vc-bitstring-status-list": "^1.0.0",
+    "@digitalcredentials/verifier-core": "github:skybridgeskills/dcc-verifier-core#1b88d8af38a6dfcdbb313159036e1d84d098c89c",
     "@playwright/test": "^1.63.0",
     "oxlint": "^1.75.0",
     "typescript": "~6.0.2",
