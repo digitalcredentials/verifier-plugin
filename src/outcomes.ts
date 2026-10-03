@@ -46,6 +46,18 @@ export interface Check {
 }
 
 /**
+ * What the host knows that the library's result can't say.
+ *
+ * `registriesUnavailable`: the host couldn't get its list of registries, so
+ * the issuer was never looked up (see `VerifyOptions`). A lookup that then
+ * never answered reads as "our list of known issuers didn't load", which is
+ * exactly what happened, rather than the vaguer "we couldn't finish checking".
+ */
+export interface OutcomeOptions {
+  registriesUnavailable?: boolean;
+}
+
+/**
  * Where an issuer's name came from. requirements.md §5.
  *
  * `unverifiable` is the case the requirements don't cover: verification
@@ -67,11 +79,13 @@ export interface IssuerIdentity {
   /**
    * Named registries we could not reach. May be empty while
    * `registriesUnreachable` is true: 2.x reports the names only in prose, so
-   * they can be lost when the fact is not.
+   * they can be lost when the fact is not. Always empty when the host said
+   * its list was unavailable, since nothing was looked up.
    */
   unreachable: string[];
   /**
-   * Whether any registry went unchecked. Branch on this, not on
+   * Whether any registry went unchecked, or, with `registriesUnavailable`,
+   * none could be looked up at all. Branch on this, not on
    * `unreachable.length` — this is what separates "we don't know" from "they
    * aren't listed", and it survives a change of wording upstream.
    */
@@ -374,13 +388,17 @@ const sealHeld = (checks: Map<string, CheckResult>): boolean => {
  * name and its provenance — and "not listed" and "couldn't reach the registry"
  * are different answers that look identical if you only read `valid`.
  */
-export const issuerIdentity = (r: VerificationResponse): IssuerIdentity => {
+export const issuerIdentity = (r: VerificationResponse, options: OutcomeOptions = {}): IssuerIdentity => {
   const checks = checksById(r);
   const step = checks.get(CHECK.registeredIssuer);
   const nothingEstablished = stoppedEarly(r);
   const held = !nothingEstablished && sealHeld(checks);
   const registries = registryNames(step);
-  const registriesUnreachable = anyUnreachable(step);
+  // The host's word counts only for a lookup that never answered. One that
+  // did, a match or a confirmed "not listed", stays what it was, so a host
+  // that sets the flag by mistake cannot hide a real answer.
+  const registriesUnreachable =
+    anyUnreachable(step) || (options.registriesUnavailable === true && !registryAnswered(step));
   const unreachable = registriesUnreachable ? unreachableNames(step) : [];
 
   const rawIssuer = (r.verifiableCredential?.['issuer'] ?? undefined) as
@@ -728,7 +746,7 @@ const expiryDate = (r: VerificationResponse): string | undefined => {
  * registry is withdrawn; saying "we couldn't check" would bury the fact that
  * the issuer has already decided.
  */
-export const summarise = (r: VerificationResponse): Outcome => {
+export const summarise = (r: VerificationResponse, options: OutcomeOptions = {}): Outcome => {
   const checks = checksById(r);
 
   if (stoppedEarly(r)) {
@@ -749,7 +767,7 @@ export const summarise = (r: VerificationResponse): Outcome => {
 
   const signature = checks.get(CHECK.signature);
   const revocation = checks.get(CHECK.status);
-  const issuer = issuerIdentity(r);
+  const issuer = issuerIdentity(r, options);
 
   // 2.x has no expiration check: an expired credential and one altered after
   // issue both fail the *signature* check with the same problem type and the
@@ -938,11 +956,11 @@ export const summarise = (r: VerificationResponse): Outcome => {
 // The breakdown in the Details view
 // ---------------------------------------------------------------------------
 
-export const listChecks = (r: VerificationResponse): Check[] => {
+export const listChecks = (r: VerificationResponse, options: OutcomeOptions = {}): Check[] => {
   if (stoppedEarly(r)) return [];
 
   const checks = checksById(r);
-  const issuer = issuerIdentity(r);
+  const issuer = issuerIdentity(r, options);
   const rows: Check[] = [];
 
   // Every label is the subject being checked, never a claim about it. A label

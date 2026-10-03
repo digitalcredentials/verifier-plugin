@@ -13,8 +13,14 @@
  *   (none required; set `credential` as a property)
  *
  * Properties
- *   credential  the credential object to show and check
- *   registries  optional override of the registries to consult
+ *   credential             the credential object to show and check
+ *   registries             optional override of the registries to consult
+ *   registriesUnavailable  set when the host couldn't get its registries: the
+ *                          issuer isn't looked up, and the card says the list
+ *                          didn't load, rather than checking a default list
+ *                          and calling a listed issuer unlisted. Use this, not
+ *                          `registries = []`: an empty list is one that names
+ *                          nobody, so the issuer reads as not on it
  *
  * Events
  *   verification-started   { credential }
@@ -195,6 +201,7 @@ export class VerifierCredential extends HTMLElement {
   #live: HTMLParagraphElement;
   #credential?: Record<string, unknown>;
   #registries?: Registry[];
+  #registriesUnavailable = false;
   #state: 'empty' | 'checking' | 'done' | 'failed' = 'empty';
   #outcome?: Outcome;
   #issuer?: IssuerIdentity;
@@ -293,6 +300,21 @@ export class VerifierCredential extends HTMLElement {
     return this.#registries;
   }
 
+  set registriesUnavailable(value: boolean) {
+    const unavailable = value === true;
+    if (unavailable === this.#registriesUnavailable) return;
+    this.#registriesUnavailable = unavailable;
+    if (!this.#credential) return;
+    // Like changing the registries: it changes the answer, so the old one
+    // goes and the credential is checked again.
+    this.#clearResult();
+    this.#schedule();
+  }
+
+  get registriesUnavailable(): boolean {
+    return this.#registriesUnavailable;
+  }
+
   connectedCallback(): void {
     // A credential can be set while the element is detached — React does
     // exactly that on remount — so the work waits here, not in the setter.
@@ -336,14 +358,17 @@ export class VerifierCredential extends HTMLElement {
     );
 
     try {
-      const response: VerificationResponse = await verify(
-        credential,
-        this.#registries ? { registries: this.#registries } : {},
-      );
+      // Read once, so the check and the words about it can't disagree if the
+      // host changes its mind mid-run (that change schedules a new run).
+      const registriesUnavailable = this.#registriesUnavailable;
+      const response: VerificationResponse = await verify(credential, {
+        ...(this.#registries && { registries: this.#registries }),
+        registriesUnavailable,
+      });
       // A newer credential arrived while this was running. Its result is the
       // one being waited for; ours would label it with the wrong verdict.
       if (superseded()) return;
-      this.#outcome = summarise(response);
+      this.#outcome = summarise(response, { registriesUnavailable });
       // verifier-core can return without echoing the parsed credential back,
       // and `issuerIdentity` reads the name off the response.
       // We were handed the credential, so supply it — otherwise a card whose
@@ -352,10 +377,11 @@ export class VerifierCredential extends HTMLElement {
         response.verifiableCredential
           ? response
           : { ...response, verifiableCredential: this.#credential },
+        { registriesUnavailable },
       );
       this.#verdictFirst = verdictLeads(response);
       this.#caveat = contentCaveat(response);
-      this.#checks = listChecks(response);
+      this.#checks = listChecks(response, { registriesUnavailable });
       this.#response = response;
       this.#state = 'done';
       this.#render();

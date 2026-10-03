@@ -15,6 +15,7 @@ export {
   type IssuerIdentity,
   type IssuerNameSource,
   type SchemaFinding,
+  type OutcomeOptions,
 } from './outcomes.js';
 export { summariseCredential, formatDate, type CredentialSummary } from './credential.js';
 export type { Severity, VerificationResponse, CheckResult } from './types.js';
