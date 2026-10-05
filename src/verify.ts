@@ -69,10 +69,13 @@ export interface VerifyOptions {
  * are also both injectable now, so if a future default reintroduces headers we
  * can supply our own rather than wait.
  *
- * Verified in Node against an injected service; **not yet confirmed in a
- * browser against a real cross-origin status list.** The remaining unknown is
- * whether vc-bitstring-status-list fetches through the loader it is handed.
- * Until a browser test covers it, treat this as very likely rather than done.
+ * Confirmed in a browser on 1 October 2026, against the real GitHub Pages: a
+ * page on localhost found the published Withdrawn credential withdrawn and Not
+ * withdrawn clear. The browser tests now cover it against a server that
+ * refuses preflights the same way (test/browser/pages-like-server.js). And
+ * the status list does go through the built-in service: patched to send a
+ * custom header, it makes the withdrawal check fail with
+ * STATUS_LIST_NOT_FOUND (tried by hand on 1 October, not a standing test).
  */
 export const verify = async (
   credential: Record<string, unknown>,

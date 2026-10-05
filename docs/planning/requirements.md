@@ -1,6 +1,6 @@
 # Credential verification in the web wallet
 
-Draft for discussion — Sunny Lee, 18 September 2026. Updated 21 and 30 September 2026.
+Draft for discussion — Sunny Lee, 18 September 2026. Updated 21 and 30 September and 3 October 2026.
 Companion document: `inventory.md`, which lists everything verification can
 tell us.
 
@@ -204,6 +204,15 @@ whether this has been withdrawn" is the normal result, not the rare one.* Two
 consequences: the "couldn't check" severity carries far more weight at launch
 than the appendix implies, and it needs to be genuinely well written rather
 than an edge case we tidy up later.
+
+**Update, 3 October 2026: fixed.** That was verifier-core 1.x. Version 2.x
+fetches withdrawal lists without the extra headers that set off the browser's
+preflight check, so a page reads them from GitHub Pages correctly (confirmed in
+a browser on 1 October). The browser tests now prove it against a stand-in for
+another site. "We couldn't check whether this has been withdrawn" is no longer
+the normal result: it now comes from a problem with a particular list (one that
+has moved, expired or doesn't verify), or a check that couldn't run. The
+paragraph above is the 21 September finding, kept as it was.
 
 The requirement: **"we couldn't reach the registry" must never look like "this
 credential is bad."** More on this in section 5.
