@@ -816,8 +816,9 @@ export const summarise = (r: VerificationResponse): Outcome => {
     // checks that actually reported. "It's genuine and hasn't been withdrawn"
     // above a breakdown saying the signature was never checked, or the
     // withdrawal list never loaded, is precisely the contradiction this file
-    // exists to prevent — and since status lists do not load in a browser
-    // today, that second case is the common path and not an edge.
+    // exists to prevent. (Under 1.x no status list loaded in a browser, so the
+    // second case was the common path; with 2.x it takes a list that is
+    // missing, expired or doesn't verify.)
     return {
       severity: 'warning',
       code: 'malformed',
