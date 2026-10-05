@@ -332,11 +332,20 @@ const build = (sig: Sig, rev: Rev, end: End, iss: Iss, sch: Sch): VerificationRe
   };
 };
 
+/**
+ * Whether the host said it couldn't get its list of registries. Every
+ * combination runs both ways: the flag only matters to a lookup that never
+ * answered, and must not open a contradiction anywhere else either.
+ */
+const HOST_LIST: ('loaded' | 'unavailable')[] = ['loaded', 'unavailable'];
+
 const cases = SIGNATURES.flatMap((sig) =>
   REVOCATIONS.flatMap((rev) =>
     ENDS.flatMap((end) =>
       ISSUERS.flatMap((iss) =>
-        SCHEMAS.map((sch) => ({ sig, rev, end, iss, sch, name: `${sig}/${rev}/${end}/${iss}/${sch}` })),
+        SCHEMAS.flatMap((sch) =>
+          HOST_LIST.map((list) => ({ sig, rev, end, iss, sch, list, name: `${sig}/${rev}/${end}/${iss}/${sch}/${list}` })),
+        ),
       ),
     ),
   ),
@@ -345,12 +354,13 @@ const cases = SIGNATURES.flatMap((sig) =>
 const DATES_ROW = `${CHECK.signature}#dates`;
 
 describe(`the headline and the breakdown agree (${cases.length} combinations)`, () => {
-  it.each(cases)('$name', ({ sig, rev, end, iss, sch }) => {
+  it.each(cases)('$name', ({ sig, rev, end, iss, sch, list }) => {
     const r = build(sig, rev, end, iss, sch);
-    const out = summarise(r);
-    const rows = listChecks(r);
+    const options = { registriesUnavailable: list === 'unavailable' };
+    const out = summarise(r, options);
+    const rows = listChecks(r, options);
     const row = (id: string) => rows.find((c) => c.id === id);
-    const where = `${sig}/${rev}/${end}/${iss}/${sch} → ${out.code}`;
+    const where = `${sig}/${rev}/${end}/${iss}/${sch}/${list} → ${out.code}`;
 
     expect(rows.length, `${where}: verification ran, so there must be rows`).toBeGreaterThan(0);
 
@@ -417,6 +427,13 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
     if (out.code === 'registry_unreachable') {
       expect(row(CHECK.registeredIssuer)?.value, `${where}: the verdict blames the list, the row doesn't`).toContain(
         'list of known issuers',
+      );
+      // ...and for the same reason. "Didn't load" above "couldn't finish
+      // checking" gives two accounts of one failure, and a host that says its
+      // list was unavailable made that pairing reachable from a second route.
+      const loaded = /didn't load/.test(out.detail);
+      expect(row(CHECK.registeredIssuer)?.value, `${where}: the verdict and the row give different reasons`).toContain(
+        loaded ? "couldn't load our list" : "couldn't finish checking",
       );
     }
 

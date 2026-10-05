@@ -1322,3 +1322,67 @@ describe('findings from the review of the 2.x migration', () => {
     expect(out.detail).not.toContain('0 of the registries');
   });
 });
+
+describe('when the host could not get its list of registries', () => {
+  // What verifier-core returns when it is given no registries at all, which
+  // is how verify() asks for it (checked against 2.x on 3 October 2026).
+  const notLookedUp = (): VerificationResponse => {
+    const r = ok();
+    set(r, skip(CHECK.registeredIssuer, 'No registries configured in verification context.'));
+    return r;
+  };
+  // The demo's "Registry offline": a registry was tried and didn't answer.
+  const offline = (): VerificationResponse => {
+    const r = ok();
+    set(
+      r,
+      fail(CHECK.registeredIssuer, [
+        { type: PROBLEM.issuerNotRegistered, title: 'Issuer Not Registered', detail: 'Not found.' },
+        { type: PROBLEM.registryUnchecked, title: 'Registry Unchecked', detail: '1 registries could not be checked: DCC Registry' },
+      ]),
+    );
+    return r;
+  };
+  const unavailable = { registriesUnavailable: true };
+  const issuerRow = (r: VerificationResponse, options = {}) =>
+    listChecks(r, options).find((c) => c.id === CHECK.registeredIssuer)?.value;
+
+  it("says the list didn't load, in the verdict and the Issuer row", () => {
+    const out = summarise(notLookedUp(), unavailable);
+    expect(out.code).toBe('registry_unreachable');
+    expect(out.severity).toBe('unchecked');
+    expect(out.headline).toBe("We couldn't confirm who issued this");
+    expect(out.detail).toMatch(/^Our list of known issuers didn't load\./);
+    expect(issuerRow(notLookedUp(), unavailable)).toBe("Springfield College — we couldn't load our list of known issuers");
+  });
+
+  it('reads exactly as a registry that was tried and did not answer', () => {
+    const ours = notLookedUp();
+    const theirs = offline();
+    expect(summarise(ours, unavailable)).toEqual(summarise(theirs));
+    expect(issuerRow(ours, unavailable)).toBe(issuerRow(theirs));
+    const a = issuerIdentity(ours, unavailable);
+    const b = issuerIdentity(theirs);
+    expect(issuerMarker(a.source, a.sealHeld)).toBe(issuerMarker(b.source, b.sealHeld));
+    expect(a.registriesUnreachable).toBe(true);
+  });
+
+  it('without the flag, a lookup that never ran still reads as unfinished', () => {
+    const out = summarise(notLookedUp());
+    expect(out.code).toBe('registry_unreachable');
+    expect(out.detail).toMatch(/^We couldn't finish checking our list of known issuers\./);
+    expect(issuerIdentity(notLookedUp()).registriesUnreachable).toBe(false);
+  });
+
+  it('cannot hide a lookup that did answer', () => {
+    const matched = ok();
+    const unlisted = ok();
+    set(unlisted, notRegistered());
+    for (const r of [matched, unlisted]) {
+      expect(summarise(r, unavailable)).toEqual(summarise(r));
+      expect(listChecks(r, unavailable)).toEqual(listChecks(r));
+      expect(issuerIdentity(r, unavailable)).toEqual(issuerIdentity(r));
+    }
+    expect(summarise(matched, unavailable).code).toBe('verified');
+  });
+});

@@ -42,6 +42,15 @@ export const DEFAULT_REGISTRIES: Registry[] = [
 
 export interface VerifyOptions {
   registries?: Registry[];
+  /**
+   * The host app couldn't get its list of registries. The issuer is then not
+   * looked up at all, rather than in registries the host never chose, and
+   * `registries` is ignored: verifier-core reports the lookup as skipped, and
+   * outcomes.ts, told the same thing, says the list didn't load. Without
+   * this, a wallet whose list failed fell back to DEFAULT_REGISTRIES and told
+   * the earner a listed issuer was "not on our list of known issuers".
+   */
+  registriesUnavailable?: boolean;
 }
 
 /**
@@ -75,7 +84,10 @@ export const verify = async (
   const registries = options.registries ?? DEFAULT_REGISTRIES;
   return (await verifyCredential({
     credential,
-    registries: registries as never,
+    // Left out, not empty: an empty list is a lookup that found nothing,
+    // reported as "not registered", while no list at all is reported as a
+    // check that never ran (checked against 2.x on 3 October 2026).
+    ...(options.registriesUnavailable ? {} : { registries: registries as never }),
 
     // 2.x defaults this to false, which drops every check that passed and
     // keeps only failures and skips. A passed check and a check that never ran

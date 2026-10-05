@@ -728,3 +728,64 @@ test.describe('a withdrawal list on another site', () => {
     expect(c.severity).toBe('success');
   });
 });
+
+test.describe('when the host could not get its list of registries', () => {
+  /** Everything in the card as the earner reads it, minus when it was checked. */
+  const wholeCard = (page: Page) =>
+    page.evaluate(() =>
+      (document.getElementById('vc')!.shadowRoot!.querySelector('.card') as HTMLElement).innerText
+        .replace(/Checked .*$/m, '')
+        .trim(),
+    );
+
+  /** Sets registriesUnavailable, waits for the check it starts, and lists the registry requests it made. */
+  const setUnavailable = async (page: Page, value: boolean) => {
+    const lookups: string[] = [];
+    const listen = (r: { url(): string }) => {
+      if (/\/fixtures\/(registry|nope)\.json/.test(r.url())) lookups.push(r.url());
+    };
+    page.on('request', listen);
+    await settle(page, async () => {
+      await page.evaluate((v) => {
+        (document.getElementById('vc') as HTMLElement & { registriesUnavailable: boolean }).registriesUnavailable = v;
+      }, value);
+    });
+    page.off('request', listen);
+    return lookups;
+  };
+
+  test("says our list didn't load, and looks nothing up", async ({ page }) => {
+    await pick(page, 'Verified');
+    const lookups = await setUnavailable(page, true);
+    expect(lookups, 'looked the issuer up anyway').toEqual([]);
+    const c = await card(page);
+    expect(c.severity).toBe('unchecked');
+    expect(c.headline).toContain("We couldn't confirm who issued this");
+    expect(c.detail).toContain("Our list of known issuers didn't load.");
+    expect(await wholeCard(page)).toContain("we couldn't load our list of known issuers");
+  });
+
+  test('reads exactly like a registry that did not answer', async ({ page }) => {
+    // The same credential both ways, so any difference is the wording's.
+    await pick(page, 'Registry offline');
+    const offline = { card: await card(page), whole: await wholeCard(page) };
+    await pick(page, 'Verified');
+    await setUnavailable(page, true);
+    expect({ card: await card(page), whole: await wholeCard(page) }).toEqual(offline);
+  });
+
+  test("the developer view shows the library's own account: the lookup never ran", async ({ page }) => {
+    await pick(page, 'Verified');
+    await setUnavailable(page, true);
+    await page.locator('#vc').getByRole('button', { name: 'Developer view', exact: true }).click();
+    expect(await wholeCard(page)).toContain('No registries configured in verification context.');
+  });
+
+  test('clearing it checks against the registries again', async ({ page }) => {
+    await pick(page, 'Verified');
+    await setUnavailable(page, true);
+    const lookups = await setUnavailable(page, false);
+    expect(lookups.length, 'did not look the issuer up again').toBeGreaterThan(0);
+    expect((await card(page)).severity).toBe('success');
+  });
+});
