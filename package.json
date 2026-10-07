@@ -32,7 +32,7 @@
     "@digitalcredentials/security-document-loader": "^6.0.0",
     "@digitalcredentials/vc": "^9.0.1",
     "@digitalcredentials/vc-bitstring-status-list": "^1.0.0",
-    "@digitalcredentials/verifier-core": "github:skybridgeskills/dcc-verifier-core#1b88d8af38a6dfcdbb313159036e1d84d098c89c",
+    "@digitalcredentials/verifier-core": "github:digitalcredentials/verifier-core#d217b042371096e84b8cd0046fbe79a667683d8a",
     "@playwright/test": "^1.63.0",
     "oxlint": "^1.75.0",
     "typescript": "~6.0.2",
