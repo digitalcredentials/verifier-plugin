@@ -228,9 +228,9 @@ test("a withdrawal list the issuer didn't sign is not believed", async ({ page }
   const c = await pick(page, 'Untrusted list');
   expect(c.severity).toBe('unchecked');
   expect(c.headline).toContain("We couldn't check whether this was withdrawn");
-  expect(c.detail).toContain("couldn't confirm the answer really came from them");
+  expect(c.detail).toContain('The withdrawal information we found may not be from the issuer');
   expect(c.severity).not.toBe('success');
-  expect(await detailRows(page)).toContainEqual(expect.stringContaining("couldn't confirm the answer came from the issuer"));
+  expect(await detailRows(page)).toContainEqual(expect.stringContaining('the information we found may not be from the issuer'));
 });
 
 test('an unrecognised issuer is never called fake', async ({ page }) => {

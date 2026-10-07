@@ -1450,12 +1450,12 @@ describe('a withdrawal list signed by someone other than the issuer', () => {
     add(r, listSignedByAnother());
     const out = summarise(r);
     expect(out).toMatchObject({ severity: 'unchecked', code: 'withdrawal_unknown' });
-    expect(out.detail).toContain("couldn't confirm the answer really came from them");
+    expect(out.detail).toContain('The withdrawal information we found may not be from the issuer');
     // Retrying cannot fix a list signed by the wrong key.
     expect(out.action).not.toContain('Try again');
     expect(row(r, CHECK.status)).toMatchObject({
       severity: 'unchecked',
-      value: "couldn't check — we couldn't confirm the answer came from the issuer",
+      value: "couldn't check — the information we found may not be from the issuer",
     });
     expect(out.action).toBe("Let Springfield College know we couldn't check whether this has been withdrawn.");
     // The earner doesn't know there is a list; that belongs in the Developer view.
@@ -1468,7 +1468,7 @@ describe('a withdrawal list signed by someone other than the issuer', () => {
     add(r, listSignedByAnother());
     const out = summarise(r);
     expect(out.code).toBe('withdrawal_unknown');
-    expect(out.detail).toContain('whether the issuer has withdrawn this');
+    expect(out.detail).toContain('may not be from the issuer');
     expect(out.detail).not.toContain('did:key');
   });
 
@@ -1489,7 +1489,7 @@ describe('a withdrawal list signed by someone other than the issuer', () => {
     expect(`${out.headline} ${out.detail}`).not.toMatch(/hasn['’]t withdrawn/);
     expect(row(r, CHECK.status)?.severity).toBe('unchecked');
     // The case verifier-core reports today, so pin its wording here too.
-    expect(out.detail).toContain("couldn't confirm the answer really came from them");
+    expect(out.detail).toContain('The withdrawal information we found may not be from the issuer');
     expect(`${out.detail} ${out.action} ${row(r, CHECK.status)?.value}`).not.toMatch(/\blist(s|ed)?\b/i);
   });
 

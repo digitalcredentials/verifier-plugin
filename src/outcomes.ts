@@ -982,8 +982,10 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
         // "the issuer" rather than the name: the seal held here, so the name is
         // always set, but for an issuer that gives none it is the bare
         // identifier or "Unknown issuer", which reads badly mid-sentence.
+        // "May not be", not "isn't": we know who signed the list, not whether
+        // the issuer asked them to.
         detail:
-          "We tried to check whether the issuer has withdrawn this, but we couldn't confirm the answer really came from them, so we can't tell either way. That's a problem at their end, not with your credential.",
+          "The withdrawal information we found may not be from the issuer, so we can't rely on it. That's a problem at their end, not with your credential.",
         // Trying again changes nothing; the list has to be fixed at source.
         // The action is a sentence the earner can pass on as it is, so it
         // says what couldn't be checked.
@@ -1190,7 +1192,7 @@ export const listChecks = (r: VerificationResponse, options: OutcomeOptions = {}
           : notWithdrawn(checks)
             ? 'none by the issuer'
             : listNotIssuers(checks)
-              ? "couldn't check — we couldn't confirm the answer came from the issuer"
+              ? "couldn't check — the information we found may not be from the issuer"
               : withdrawalUnavailable(revocation)
                 ? "couldn't check — the issuer's list didn't load"
                 : 'not checked',
