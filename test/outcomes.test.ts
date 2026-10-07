@@ -1450,13 +1450,26 @@ describe('a withdrawal list signed by someone other than the issuer', () => {
     add(r, listSignedByAnother());
     const out = summarise(r);
     expect(out).toMatchObject({ severity: 'unchecked', code: 'withdrawal_unknown' });
-    expect(out.detail).toContain("isn't signed by the issuer");
+    expect(out.detail).toContain("couldn't confirm the answer really came from them");
     // Retrying cannot fix a list signed by the wrong key.
     expect(out.action).not.toContain('Try again');
     expect(row(r, CHECK.status)).toMatchObject({
       severity: 'unchecked',
-      value: "couldn't check — the list isn't signed by the issuer",
+      value: "couldn't check — we couldn't confirm the answer came from the issuer",
     });
+    expect(out.action).toBe("Let Springfield College know we couldn't check whether this has been withdrawn.");
+    // The earner doesn't know there is a list; that belongs in the Developer view.
+    expect(`${out.detail} ${out.action} ${row(r, CHECK.status)?.value}`).not.toMatch(/\blist(s|ed)?\b/i);
+  });
+
+  it('does not put a bare identifier mid-sentence when the issuer gives no name', () => {
+    const r = ok();
+    r.verifiableCredential = { ...r.verifiableCredential, issuer: 'did:key:z6Mkn' };
+    add(r, listSignedByAnother());
+    const out = summarise(r);
+    expect(out.code).toBe('withdrawal_unknown');
+    expect(out.detail).toContain('whether the issuer has withdrawn this');
+    expect(out.detail).not.toContain('did:key');
   });
 
   it('is not repeated when it says "suspended"', () => {
@@ -1475,6 +1488,9 @@ describe('a withdrawal list signed by someone other than the issuer', () => {
     expect(out.code).toBe('withdrawal_unknown');
     expect(`${out.headline} ${out.detail}`).not.toMatch(/hasn['’]t withdrawn/);
     expect(row(r, CHECK.status)?.severity).toBe('unchecked');
+    // The case verifier-core reports today, so pin its wording here too.
+    expect(out.detail).toContain("couldn't confirm the answer really came from them");
+    expect(`${out.detail} ${out.action} ${row(r, CHECK.status)?.value}`).not.toMatch(/\blist(s|ed)?\b/i);
   });
 
   it("keeps an expired credential's reassurance to the seal", () => {

@@ -977,10 +977,17 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
         severity: 'unchecked',
         code: 'withdrawal_unknown',
         headline: "We couldn't check whether this was withdrawn",
+        // The earner doesn't know there is a list, let alone who signs it, so
+        // the detail says what we couldn't find out, not how we look. It says
+        // "the issuer" rather than the name: the seal held here, so the name is
+        // always set, but for an issuer that gives none it is the bare
+        // identifier or "Unknown issuer", which reads badly mid-sentence.
         detail:
-          "The issuer's withdrawal list isn't signed by the issuer, so we can't rely on what it says. That's a problem with their setup, not with your credential.",
+          "We tried to check whether the issuer has withdrawn this, but we couldn't confirm the answer really came from them, so we can't tell either way. That's a problem at their end, not with your credential.",
         // Trying again changes nothing; the list has to be fixed at source.
-        action: `Let ${named ?? 'the issuer'} know their withdrawal list needs fixing.`,
+        // The action is a sentence the earner can pass on as it is, so it
+        // says what couldn't be checked.
+        action: `Let ${named ?? 'the issuer'} know we couldn't check whether this has been withdrawn.`,
       };
     }
     return {
@@ -1183,7 +1190,7 @@ export const listChecks = (r: VerificationResponse, options: OutcomeOptions = {}
           : notWithdrawn(checks)
             ? 'none by the issuer'
             : listNotIssuers(checks)
-              ? "couldn't check — the list isn't signed by the issuer"
+              ? "couldn't check — we couldn't confirm the answer came from the issuer"
               : withdrawalUnavailable(revocation)
                 ? "couldn't check — the issuer's list didn't load"
                 : 'not checked',
