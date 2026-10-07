@@ -185,6 +185,54 @@ test('the issuer row speaks the earner\'s language, and lends no name without th
   expect(dev).toContain('Issuer found in registry: Local Dev Registry');
 });
 
+/**
+ * The situations verifier-core has named by type since its main of 7 October
+ * 2026 (d217b04): each runs the real library over a real fixture, signed in
+ * scripts/make-fixtures.js.
+ */
+test('a credential not valid yet is a warning that says when it will be', async ({ page }) => {
+  const c = await pick(page, 'Not yet valid');
+  expect(c.severity).toBe('warning');
+  expect(c.headline).toContain('Not valid until 1 January 2099');
+  expect(c.detail).toBe("It hasn't been tampered with, and the issuer hasn't withdrawn it.");
+  expect(c.action).toBe('Check it again on or after that date.');
+});
+
+test('a suspended credential is an error of its own, and may be temporary', async ({ page }) => {
+  const c = await pick(page, 'Suspended');
+  expect(c.severity).toBe('error');
+  expect(c.headline).toContain('The issuer has suspended this');
+  expect(c.detail).toContain('may be temporary');
+  expect(await detailRows(page)).toContainEqual(expect.stringContaining('suspended by the issuer'));
+});
+
+test("a seal made with someone else's key is not called tampering", async ({ page }) => {
+  const c = await pick(page, 'Not their seal');
+  expect(c.severity).toBe('error');
+  expect(c.headline).toContain("We couldn't confirm who sealed this");
+  expect(`${c.headline} ${c.detail}`).not.toMatch(/tamper/i);
+  expect(c.action).toBe('Ask the issuer for an official copy.');
+  expect(await detailRows(page)).toContainEqual(expect.stringContaining("the digital seal isn't theirs"));
+});
+
+/**
+ * Clear on that list. Read on trust, this would be Verified — "the issuer
+ * hasn't withdrawn it" — on the word of whoever signed the list, who could
+ * as easily have un-withdrawn it.
+ *
+ * Not tested the other way round: a mark on a stranger's list ends
+ * verifier-core's status suite before the signer is compared, so the library
+ * reports a plain withdrawal (raised upstream).
+ */
+test("a withdrawal list the issuer didn't sign is not believed", async ({ page }) => {
+  const c = await pick(page, 'Untrusted list');
+  expect(c.severity).toBe('unchecked');
+  expect(c.headline).toContain("We couldn't check whether this was withdrawn");
+  expect(c.detail).toContain("isn't signed by the issuer");
+  expect(c.severity).not.toBe('success');
+  expect(await detailRows(page)).toContainEqual(expect.stringContaining("the list isn't signed by the issuer"));
+});
+
 test('an unrecognised issuer is never called fake', async ({ page }) => {
   const c = await pick(page, 'Issuer unknown');
   expect(c.severity).not.toBe('error');
@@ -335,8 +383,8 @@ test.describe('the three views', () => {
     expect(shown.text).toContain('Passed: context-exists');
     expect(shown.text).toContain('Credential has a valid @context property.');
     expect(shown.text).toContain('Failed: bitstring');
-    expect(shown.text).toContain('Credential Revoked or Suspended');
-    expect(shown.text).toContain('The credential has been revoked or suspended according to the status list.');
+    expect(shown.text).toContain('Credential Revoked');
+    expect(shown.text).toMatch(/The status list \S+ marks the credential revoked \(index 42\)\./);
     // A real space, or a screen reader says "context-existsfatal".
     expect(shown.text).toContain('context-exists fatal');
   });

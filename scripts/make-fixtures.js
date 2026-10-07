@@ -54,6 +54,12 @@ const LIST_LENGTH = 131072;
 
 /** Fixed seed, so re-running produces the same issuer and the same fixtures. */
 const SEED = new Uint8Array(32).fill(7);
+/**
+ * A second fixed key: not the issuer. It signs a withdrawal list the issuer
+ * didn't, and seals a credential that names the issuer, so verifier-core has
+ * a real mismatch to report in each case.
+ */
+const OTHER_SEED = new Uint8Array(32).fill(8);
 
 const context = [
   'https://www.w3.org/ns/credentials/v2',
@@ -105,6 +111,13 @@ const main = async () => {
   const documentLoader = securityLoader({ fetchRemoteContexts: true }).build();
   const sign = (credential) => vc.issue({ credential, suite, documentLoader });
 
+  const otherKey = await Ed25519VerificationKey2020.generate({ seed: OTHER_SEED });
+  const otherDid = `did:key:${otherKey.fingerprint()}`;
+  otherKey.id = `${otherDid}#${otherKey.fingerprint()}`;
+  otherKey.controller = otherDid;
+  const signAsOther = (credential) =>
+    vc.issue({ credential, suite: new Ed25519Signature2020({ key: otherKey }), documentLoader });
+
   console.log(`issuer: ${issuerDid}\n`);
 
   const written = [];
@@ -125,15 +138,46 @@ const main = async () => {
   statusListCredential.validFrom = '2026-03-01T00:00:00Z';
   await write('status-list', await sign(statusListCredential), 'the signed withdrawal list');
 
-  const statusEntry = (index) => ({
+  const statusEntry = (index, url = STATUS_LIST_URL, purpose = 'revocation') => ({
     credentialStatus: {
-      id: `${STATUS_LIST_URL}#${index}`,
+      id: `${url}#${index}`,
       type: 'BitstringStatusListEntry',
-      statusPurpose: 'revocation',
+      statusPurpose: purpose,
       statusListIndex: String(index),
-      statusListCredential: STATUS_LIST_URL,
+      statusListCredential: url,
     },
   });
+
+  // Two more lists beside the first, so they are served wherever it is.
+  const SUSPENSION_LIST_URL = new URL('suspension-list.json', STATUS_LIST_URL).href;
+  const OTHER_LIST_URL = new URL('status-list-other.json', STATUS_LIST_URL).href;
+
+  // --- a suspension list, the issuer's own ----------------------------------
+  const suspensions = await createList({ length: LIST_LENGTH });
+  suspensions.setStatus(WITHDRAWN_INDEX, true);
+  const suspensionList = await createCredential({
+    id: SUSPENSION_LIST_URL,
+    list: suspensions,
+    statusPurpose: 'suspension',
+  });
+  suspensionList.issuer = issuerDid;
+  suspensionList.validFrom = '2026-03-01T00:00:00Z';
+  await write('suspension-list', await sign(suspensionList), 'the signed suspension list');
+
+  // --- a withdrawal list signed by someone other than the issuer ------------
+  // Marks index 42, so a credential pointing here would read "withdrawn" if
+  // the list's signer were taken on trust. verifier-core reports it as
+  // STATUS_LIST_ISSUER_MISMATCH; outcomes.ts repeats neither answer.
+  const otherEntries = await createList({ length: LIST_LENGTH });
+  otherEntries.setStatus(WITHDRAWN_INDEX, true);
+  const otherList = await createCredential({
+    id: OTHER_LIST_URL,
+    list: otherEntries,
+    statusPurpose: 'revocation',
+  });
+  otherList.issuer = otherDid;
+  otherList.validFrom = '2026-03-01T00:00:00Z';
+  await write('status-list-other', await signAsOther(otherList), "a withdrawal list signed by a key that isn't the issuer's");
 
   // --- verified: everything passes, nothing to withdraw --------------------
   await write('verified', await sign(baseCredential(issuerDid)), 'signed, in date, no withdrawal list');
@@ -217,6 +261,55 @@ const main = async () => {
   tampered.credentialSubject.name = 'Robin Whitaker';
   await write('tampered', tampered, 'signed, then the recipient name was changed');
 
+  // --- not yet valid: genuine, but its start date hasn't come ---------------
+  await write(
+    'not-yet-valid',
+    await sign(
+      baseCredential(issuerDid, {
+        uuid: '4b7e9c21-3d58-4f6a-a1e2-6c0d8f3b9a57',
+        credential: { validFrom: '2099-01-01T00:00:00Z' },
+      }),
+    ),
+    'signed, but not valid until 2099',
+  );
+
+  // --- suspended: marked on the issuer's suspension list --------------------
+  await write(
+    'suspended',
+    await sign(
+      baseCredential(issuerDid, {
+        uuid: '7d1f3a86-2b49-4c0e-9e57-8a6c2d4f1b30',
+        credential: statusEntry(WITHDRAWN_INDEX, SUSPENSION_LIST_URL, 'suspension'),
+      }),
+    ),
+    `signed, and marked suspended at index ${WITHDRAWN_INDEX}`,
+  );
+
+  // --- withdrawal list not the issuer's -------------------------------------
+  // Not marked on it: the case verifier-core reports. A mark would end its
+  // status suite at the withdrawal check, which is fatal, before the check
+  // that compares the list's signer runs — so a stranger's "withdrawn" still
+  // reads as the issuer's. Raised upstream; outcomes.ts already handles both.
+  await write(
+    'list-not-issuers',
+    await sign(
+      baseCredential(issuerDid, {
+        uuid: '2e8a5d17-9c63-4b1f-8d24-0f7b3e6a9c85',
+        credential: statusEntry(7, OTHER_LIST_URL),
+      }),
+    ),
+    "signed, and checked against a list the issuer didn't sign",
+  );
+
+  // --- sealed by someone else -----------------------------------------------
+  // Names the issuer, but sealed with a key that isn't theirs. The content is
+  // untouched; what can't be shown is that the issuer sealed it.
+  await write(
+    'not-their-seal',
+    await signAsOther(baseCredential(issuerDid, { uuid: 'c93b6e0a-5f14-4d8b-b2a7-1e9d4c6f0832' })),
+    "names the issuer, sealed with a key that isn't theirs",
+  );
+
   // --- no signature at all -------------------------------------------------
   await write('unsigned', baseCredential(issuerDid, { uuid: 'b17f3e58-6a24-4c9d-85b1-0e7c2f9a4d36' }),
     'never signed — no proof to check');
@@ -247,8 +340,25 @@ const main = async () => {
     'a local registry that recognises the test issuer',
   );
 
+  // --- a registry that answers, and doesn't list the test issuer ------------
+  // For "issuer unknown": a lookup that ran and found nothing. An empty
+  // `registries` no longer stands in for this — verifier-core skips the
+  // lookup for an empty list, which reads as "we couldn't check".
+  await write(
+    'registry-unlisted',
+    {
+      meta: {
+        created: '2026-10-07T00:00:00Z',
+        updated: '2026-10-07T00:00:00Z',
+        note: 'TEST ONLY — a registry that lists nobody, so the verifier-plugin demo page can show an issuer that is not on the list. Never configure this file as a registry in anything real.',
+      },
+      registry: {},
+    },
+    'a local registry that lists nobody',
+  );
+
   console.log(`written to ${OUT}`);
-  for (const [name, note] of written) console.log(`  ${name.padEnd(15)} ${note}`);
+  for (const [name, note] of written) console.log(`  ${name.padEnd(18)} ${note}`);
 };
 
 main().catch((error) => {

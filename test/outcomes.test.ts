@@ -69,16 +69,19 @@ const tamperedSignature = (): CheckResult =>
       {
         type: PROBLEM.invalidSignature,
         title: 'Invalid Signature',
-        detail: 'Verification error(s).',
+        // The library's own message since verifier-core reports the signature
+        // library's error rather than its wrapper's.
+        detail: 'Invalid signature.',
       },
     ],
     true,
   );
 
 /**
- * 2.x has no expiration check. An expired credential fails the *signature*
- * check, and `summarise()` confirms it against the credential's own end date,
- * so a test for expiry has to set both.
+ * An expired credential still fails the *signature* check — the dates are
+ * judged there — but since verifier-core #58 with its own problem type,
+ * carrying the library's date sentence as its detail. The end date is set too,
+ * because the headline names it.
  */
 const PAST = '2026-01-09T10:00:00Z';
 const expire = (r: VerificationResponse): void => {
@@ -89,8 +92,8 @@ const expire = (r: VerificationResponse): void => {
       CHECK.signature,
       [
         {
-          type: PROBLEM.invalidSignature,
-          title: 'Invalid Signature',
+          type: PROBLEM.credentialExpired,
+          title: 'Credential Expired',
           detail: `The current date time (2026-09-23T00:00:00Z) is after "validUntil" (${PAST}).`,
         },
       ],
@@ -511,10 +514,11 @@ describe('what an expired credential says', () => {
       fail(
         CHECK.signature,
         [
+          { type: PROBLEM.invalidSignature, title: 'Invalid Signature', detail: 'Invalid signature.' },
           {
-            type: PROBLEM.invalidSignature,
-            title: 'Invalid Signature',
-            detail: `Verification error(s). The current date time is after "validUntil" (${PAST}).`,
+            type: PROBLEM.credentialExpired,
+            title: 'Credential Expired',
+            detail: `The current date time is after "validUntil" (${PAST}).`,
           },
         ],
         true,
@@ -1384,5 +1388,246 @@ describe('when the host could not get its list of registries', () => {
       expect(issuerIdentity(r, unavailable)).toEqual(issuerIdentity(r));
     }
     expect(summarise(matched, unavailable).code).toBe('verified');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// verifier-core main (d217b04): problems it now names by type
+// ---------------------------------------------------------------------------
+
+const revokedBy = (type: string, title: string): CheckResult =>
+  fail(CHECK.status, [{ type, title, detail: `The credential has been ${title.split(' ').pop()!.toLowerCase()}.` }]);
+
+/** verifier-core's own check, reporting a list someone else signed. */
+const listSignedByAnother = (): CheckResult =>
+  fail(CHECK.statusListIssuer, [
+    {
+      type: PROBLEM.statusListIssuerMismatch,
+      title: 'Status List Issuer Mismatch',
+      detail: 'The status list was issued by did:key:z6Mkother, not the credential issuer did:key:z6Mkn.',
+    },
+  ]);
+
+const add = (r: VerificationResponse, c: CheckResult): void => {
+  r.results = [...(r.results ?? []), c];
+};
+
+const row = (r: VerificationResponse, id: string) => listChecks(r).find((c) => c.id === id);
+
+describe('a suspended credential', () => {
+  it('is an error of its own, not "withdrawn", and says it may be temporary', () => {
+    const r = ok();
+    set(r, revokedBy(PROBLEM.suspended, 'Credential Suspended'));
+    const out = summarise(r);
+    expect(out).toMatchObject({ severity: 'error', code: 'suspended', headline: 'The issuer has suspended this' });
+    expect(out.detail).toContain('may be temporary');
+    expect(out.action).toBe('Ask Springfield College about it.');
+    expect(row(r, CHECK.status)).toMatchObject({ severity: 'error', value: 'suspended by the issuer' });
+  });
+
+  it('yields to a withdrawal when the credential carries both', () => {
+    const r = ok();
+    set(
+      r,
+      fail(CHECK.status, [
+        { type: PROBLEM.suspended, title: 'Credential Suspended', detail: 'Suspended.' },
+        { type: PROBLEM.revoked, title: 'Credential Revoked', detail: 'Revoked.' },
+      ]),
+    );
+    expect(summarise(r).code).toBe('withdrawn');
+    expect(row(r, CHECK.status)?.value).toBe('withdrawn by the issuer');
+  });
+});
+
+describe('a withdrawal list signed by someone other than the issuer', () => {
+  it('is not repeated when it says "withdrawn"', () => {
+    const r = ok();
+    set(r, revokedBy(PROBLEM.revoked, 'Credential Revoked'));
+    add(r, listSignedByAnother());
+    const out = summarise(r);
+    expect(out).toMatchObject({ severity: 'unchecked', code: 'withdrawal_unknown' });
+    expect(out.detail).toContain("isn't signed by the issuer");
+    // Retrying cannot fix a list signed by the wrong key.
+    expect(out.action).not.toContain('Try again');
+    expect(row(r, CHECK.status)).toMatchObject({
+      severity: 'unchecked',
+      value: "couldn't check — the list isn't signed by the issuer",
+    });
+  });
+
+  it('is not repeated when it says "suspended"', () => {
+    const r = ok();
+    set(r, revokedBy(PROBLEM.suspended, 'Credential Suspended'));
+    add(r, listSignedByAnother());
+    expect(summarise(r).code).toBe('withdrawal_unknown');
+  });
+
+  it('is not repeated when it says the credential is clear, either', () => {
+    // The check itself passed: only the list's signer is wrong. Saying "the
+    // issuer hasn't withdrawn it" would take a stranger's word for it.
+    const r = ok();
+    add(r, listSignedByAnother());
+    const out = summarise(r);
+    expect(out.code).toBe('withdrawal_unknown');
+    expect(`${out.headline} ${out.detail}`).not.toMatch(/hasn['’]t withdrawn/);
+    expect(row(r, CHECK.status)?.severity).toBe('unchecked');
+  });
+
+  it("keeps an expired credential's reassurance to the seal", () => {
+    const r = ok();
+    expire(r);
+    add(r, listSignedByAnother());
+    const out = summarise(r);
+    expect(out.code).toBe('expired');
+    expect(out.detail).toBe("It hasn't been tampered with.");
+  });
+});
+
+describe('a credential not valid yet', () => {
+  const notYet = (r: VerificationResponse, validFrom?: string) => {
+    r.verifiableCredential = { ...r.verifiableCredential, ...(validFrom && { validFrom }) };
+    set(
+      r,
+      fail(
+        CHECK.signature,
+        [
+          {
+            type: PROBLEM.credentialNotYetValid,
+            title: 'Credential Not Yet Valid',
+            detail: `The current date time (2026-10-07T00:00:00Z) is before "validFrom" (${validFrom}).`,
+          },
+        ],
+        true,
+      ),
+    );
+  };
+
+  it('reads like expiry: a warning that names the date, and the seal held', () => {
+    const r = ok();
+    notYet(r, '2099-01-01T00:00:00Z');
+    const out = summarise(r);
+    expect(out).toMatchObject({
+      severity: 'warning',
+      code: 'not_yet_valid',
+      headline: 'Not valid until 1 January 2099',
+      detail: "It hasn't been tampered with, and the issuer hasn't withdrawn it.",
+      action: 'Check it again on or after that date.',
+    });
+    expect(row(r, `${CHECK.signature}#dates`)).toMatchObject({ severity: 'warning', value: 'not valid until 1 January 2099' });
+    expect(row(r, CHECK.signature)).toMatchObject({ severity: 'success', value: 'none detected' });
+    expect(issuerIdentity(r).sealHeld).toBe(true);
+  });
+
+  it('reads the start date from issuanceDate on a VC 1.1 credential', () => {
+    const r = ok();
+    r.verifiableCredential = { ...r.verifiableCredential, issuanceDate: '2099-03-04T00:00:00Z' };
+    notYet(r);
+    expect(summarise(r).headline).toBe('Not valid until 4 March 2099');
+  });
+
+  it('falls back when there is no readable date', () => {
+    const r = ok();
+    notYet(r);
+    const out = summarise(r);
+    expect(out.headline).toBe("This isn't valid yet");
+    expect(out.action).toBe('Check it again later.');
+    expect(row(r, `${CHECK.signature}#dates`)?.value).toBe('not valid yet');
+  });
+});
+
+describe('a seal made with a key that is not the issuer’s', () => {
+  const notTheirs = (): CheckResult =>
+    fail(
+      CHECK.signature,
+      [
+        {
+          type: PROBLEM.verificationMethod,
+          title: 'Verification Method Error',
+          detail: 'The credential issuer did:key:z6Mkn does not control did:key:z6Mkother#z6Mkother.',
+        },
+      ],
+      true,
+    );
+
+  it('is not called tampering', () => {
+    const r = ok();
+    set(r, notTheirs());
+    const out = summarise(r);
+    expect(out).toMatchObject({ severity: 'error', code: 'key_mismatch', headline: "We couldn't confirm who sealed this" });
+    expect(`${out.headline} ${out.detail}`).not.toMatch(/tamper|changed|altered/i);
+    expect(row(r, CHECK.signature)).toMatchObject({ severity: 'unchecked', value: 'not checked' });
+  });
+
+  it('puts the doubt on the Issuer row, and lends the issuer no name', () => {
+    const r = ok();
+    set(r, notTheirs());
+    expect(row(r, CHECK.registeredIssuer)).toMatchObject({
+      severity: 'error',
+      value: "can't confirm — the digital seal isn't theirs",
+    });
+    expect(summarise(r).action).toBe('Ask the issuer for an official copy.');
+    expect(issuerIdentity(r).sealHeld).toBe(false);
+  });
+
+  it('leads over a withdrawal, which only the issuer’s seal makes theirs to have said', () => {
+    const r = ok();
+    set(r, notTheirs());
+    set(r, revokedBy(PROBLEM.revoked, 'Credential Revoked'));
+    expect(summarise(r).code).toBe('key_mismatch');
+  });
+
+  it('yields to tampering reported alongside it', () => {
+    const r = ok();
+    set(
+      r,
+      fail(
+        CHECK.signature,
+        [
+          { type: PROBLEM.invalidSignature, title: 'Invalid Signature', detail: 'Invalid signature.' },
+          { type: PROBLEM.verificationMethod, title: 'Verification Method Error', detail: 'x' },
+        ],
+        true,
+      ),
+    );
+    expect(summarise(r).code).toBe('invalid_signature');
+    expect(row(r, CHECK.registeredIssuer)?.severity).toBe('unchecked');
+  });
+});
+
+describe('checks verifier-core stopped before, after a fatal signature failure', () => {
+  const NOT_RUN = 'Not run: proof.signature failed';
+  /** What the library now returns for an expired credential: nothing after the seal. */
+  const expiredAndHalted = (): VerificationResponse => {
+    const r = ok();
+    expire(r);
+    set(r, skip(CHECK.status, NOT_RUN));
+    set(r, skip(CHECK.registeredIssuer, NOT_RUN));
+    set(r, skip(CHECK.schema, NOT_RUN));
+    return r;
+  };
+
+  it('reads "not checked" rather than inventing a failure', () => {
+    const rows = listChecks(expiredAndHalted());
+    const value = (id: string) => rows.find((c) => c.id === id)?.value;
+    expect(value(CHECK.registeredIssuer)).toBe('Springfield College — not checked');
+    expect(value(CHECK.status)).toBe('not checked');
+    // Not "couldn't load the standard": nothing was tried.
+    expect(value(CHECK.schema)).toBe('not checked');
+    expect(schemaFinding(expiredAndHalted())).toEqual({ state: 'not_run' });
+  });
+
+  it('still reports the expiry, and claims nothing about the withdrawal it never checked', () => {
+    const out = summarise(expiredAndHalted());
+    expect(out.code).toBe('expired');
+    expect(out.detail).toBe("It hasn't been tampered with.");
+  });
+
+  it('marks a tampered credential’s name unconfirmed, though its issuer was never looked up', () => {
+    const r = ok();
+    set(r, tamperedSignature());
+    set(r, skip(CHECK.registeredIssuer, NOT_RUN));
+    const id = issuerIdentity(r);
+    expect(id.source).toBe('unknown');
+    expect(issuerMarker(id.source, id.sealHeld)).toBe('unconfirmed');
   });
 });

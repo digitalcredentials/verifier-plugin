@@ -23,9 +23,9 @@ export type Severity = 'success' | 'warning' | 'error' | 'unchecked';
  * One problem, in RFC 9457 shape.
  *
  * `type` is the stable part and the only part worth branching on. `detail` is
- * prose meant for a developer, and we read it in exactly one place — see
- * EXPIRED_MARKERS below, and the comment explaining why that is a deliberate
- * exception rather than a pattern.
+ * prose meant for a developer. We read it only where the library carries a
+ * fact nowhere else — registry names, below, and schema clauses in
+ * outcomes.ts — and never to decide what a credential is accused of.
  */
 export interface ProblemDetail {
   type: string;
@@ -112,6 +112,11 @@ export const CHECK = {
   proofExists: 'cryptographic.core.proof-exists',
   signature: 'cryptographic.proof.signature',
   status: 'cryptographic.status.bitstring',
+  /**
+   * Whether the withdrawal list was signed by the credential's own issuer.
+   * Runs after `status`, and only for lists that loaded.
+   */
+  statusListIssuer: 'cryptographic.status.list-issuer',
   registeredIssuer: 'trust.registry.issuer',
   recognition: 'recognition.profile',
   schema: 'semantic.openbadges.schema.schema.obv3.json',
@@ -119,13 +124,46 @@ export const CHECK = {
 
 /** Problem types we branch on. Everything else falls through to a default. */
 export const PROBLEM = {
+  /**
+   * The seal does not match the content: it was altered after issue. Since
+   * verifier-core #58 and #59 this type means only that — expiry, a date not
+   * yet reached, and a key that isn't the issuer's each have their own.
+   */
   invalidSignature: 'https://www.w3.org/TR/vc-data-model#INVALID_SIGNATURE',
+  /**
+   * The seal held, and the end date has passed. @digitalcredentials/vc reads
+   * dates only after the proof verifies, so this is evidence the credential
+   * is genuine, not a doubt about it.
+   */
+  credentialExpired: 'https://www.w3.org/TR/vc-data-model#CREDENTIAL_EXPIRED',
+  /** As above, for a start date still in the future. */
+  credentialNotYetValid: 'https://www.w3.org/TR/vc-data-model#CREDENTIAL_NOT_YET_VALID',
+  /**
+   * The key that made the seal is missing, not authorised for it, or not the
+   * issuer's. The content may be untouched; what can't be shown is that the
+   * issuer it names sealed it.
+   */
+  verificationMethod: 'https://www.w3.org/TR/vc-data-model#VERIFICATION_METHOD_ERROR',
   proofVerification: 'https://www.w3.org/TR/vc-data-model#PROOF_VERIFICATION_ERROR',
   issuerNotRegistered: 'https://www.w3.org/TR/vc-data-model#ISSUER_NOT_REGISTERED',
   registryUnchecked: 'https://www.w3.org/TR/vc-data-model#REGISTRY_UNCHECKED',
   schemaValidationFailed: 'https://www.w3.org/TR/vc-data-model#SCHEMA_VALIDATION_FAILED',
-  /** The status list said so. The only thing that means "withdrawn". */
-  revoked: 'https://www.w3.org/TR/vc-data-model#CREDENTIAL_REVOKED_OR_SUSPENDED',
+  /**
+   * The status list says so. The only thing that means "withdrawn" — and only
+   * while the list is the issuer's own (see `statusListIssuerMismatch`).
+   */
+  revoked: 'https://www.w3.org/TR/vc-data-model#CREDENTIAL_REVOKED',
+  /** As `revoked`, for the suspension bit: possibly temporary. */
+  suspended: 'https://www.w3.org/TR/vc-data-model#CREDENTIAL_SUSPENDED',
+  /**
+   * The withdrawal list was signed by someone other than the credential's
+   * issuer. verifier-core reports it as a warning and leaves `verified` alone,
+   * because some status services sign every list with their own DID, and says
+   * consumers who need the binding should treat it as decisive. We do: whoever
+   * controls the list's host could otherwise mark a credential withdrawn, or
+   * un-withdraw it, so its answer is not ours to repeat either way.
+   */
+  statusListIssuerMismatch: 'https://www.w3.org/TR/vc-data-model#STATUS_LIST_ISSUER_MISMATCH',
 } as const;
 
 /**
@@ -140,34 +178,6 @@ export const PROBLEM = {
  */
 export const STATUS_LIST_PROBLEM_PREFIX =
   'https://www.w3.org/TR/vc-data-model#STATUS_LIST_';
-
-/**
- * Markers in problem prose. Corroborating signals only — never the sole basis
- * for what we tell someone.
- *
- * verifier-core 2.x has no expiration check. An expired credential fails the
- * *signature* check carrying the same problem type and title as one altered
- * after issue — `INVALID_SIGNATURE` / "Invalid Signature" — so the two are
- * separated only by the sentence in `detail`.
- *
- * Rather than trust that sentence, `summarise()` confirms expiry against the
- * credential's own `validUntil` / `expirationDate`, which we hold and can
- * check ourselves. The marker below is a second route to the same conclusion,
- * kept because it also covers a credential whose date we failed to parse.
- *
- * Tampering is matched on its own marker and never inherited by default, so a
- * wording change upstream sends an unattributable signature failure to "we
- * couldn't finish checking this" rather than to an accusation.
- *
- * `test/expiry.test.ts` pins both against the real library and the real
- * fixtures, so a change in wording fails loudly instead of silently.
- *
- * Remove when verifier-core carries a distinct problem type. Raised on
- * verifier-core#32.
- */
-export const EXPIRED_MARKERS = ['is after "validUntil"', 'has expired'] as const;
-/** What the library says when the signature itself did not verify. */
-export const TAMPERED_MARKERS = ['Verification error'] as const;
 
 /**
  * How the registry check reports what it found — in prose, on both paths.
