@@ -47,8 +47,11 @@ rebuilds from every push to `main`:
 "@digitalcredentials/verifier-plugin": "github:digitalcredentials/verifier-plugin#release"
 ```
 
-`npm install` runs none of this package's scripts, and verifier-core is bundled
-into `dist/`, so the wallet installs nothing else. `npm update
+The release branch's `package.json` has no scripts and no devDependencies, so
+`npm install` builds nothing and runs nothing of ours, and verifier-core is
+bundled into `dist/`, so the wallet installs nothing else. (npm *builds* a git
+dependency whose `package.json` has a `build` script, installing all its
+devDependencies first; that is why the workflow strips them.) `npm update
 @digitalcredentials/verifier-plugin` moves the lock file to the latest build.
 
 **Register.** Importing the package registers `<verifier-credential>` and tells
@@ -72,7 +75,10 @@ export function VerifierDetail({ credential }: { credential: Record<string, unkn
 ```
 
 The wallet's `WalletPlugin` also requires a page of its own (`Component`); see
-the guide, section 5.
+the guide, section 5. What verifier-plugin's page should be is not decided yet.
+
+The types come from `@types/react`, which a React host already has. A
+TypeScript project without React needs `skipLibCheck`.
 
 **Properties**, set as properties, not attributes (React 19 does this for a
 custom element that defines them):
@@ -85,7 +91,8 @@ custom element that defines them):
 
 **Events**, bubbling and composed: `verification-started` `{ credential }`,
 `verification-complete` `{ outcome, checks, response }`, `verification-failed`
-`{ error }`.
+`{ error }`. In React, listen through a `ref` with `addEventListener`; the
+typings don't declare `on…` props for them.
 
 **Styling.** It draws in a shadow root with its own styles. To match the
 wallet's palette, set any of these CSS custom properties on the element:

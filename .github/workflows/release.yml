@@ -1,7 +1,7 @@
 name: Release branch
 
-# Builds dist/ from every push to main and writes it, with package.json,
-# LICENSE and README.md, to the `release` branch. A wallet depends on
+# Builds dist/ from every push to main and writes it, with LICENSE, README.md
+# and a package.json stripped of scripts, to the `release` branch. A wallet depends on
 # "github:digitalcredentials/verifier-plugin#release" and installs the built
 # package without running any script of ours at install time
 # (lcw-front-end docs/plugins.md, section 4). Copied from batch-issuer-ui's
@@ -14,6 +14,12 @@ name: Release branch
 on:
   push:
     branches: [main]
+
+# One publish at a time, so two quick pushes can't race between the tip check
+# and the force-push. Queued, not cancelled: the tip check skips stale ones.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -58,12 +64,16 @@ jobs:
       - name: Push the built package to the release branch
         shell: bash
         run: |
-          set -eu
+          set -euo pipefail
           remote="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
 
           # A re-run of an older run must not put old code over new: only
           # the build of main's current tip is pushed.
           tip=$(git ls-remote "$remote" refs/heads/main | cut -f1)
+          if [ -z "$tip" ]; then
+            echo "Couldn't read main's tip; not publishing." >&2
+            exit 1
+          fi
           if [ "$tip" != "$BUILT_FROM" ]; then
             echo "main has moved on to $tip; not publishing $BUILT_FROM."
             exit 0
@@ -71,7 +81,15 @@ jobs:
 
           stage="$RUNNER_TEMP/release"
           mkdir -p "$stage"
-          cp -R dist package.json LICENSE README.md "$stage/"
+          cp -R dist LICENSE README.md "$stage/"
+          # npm builds a git dependency on install when its package.json has a
+          # build, prepare or install script, by installing every
+          # devDependency first: vite, Playwright, and verifier-core from git,
+          # whose own build needs pnpm. So the release package.json carries no
+          # scripts and no devDependencies, and nothing runs on install. Not
+          # `engines` either: dist is browser code, and Node 24 is only what
+          # building it needs.
+          jq 'del(.scripts, .devDependencies, .engines)' package.json > "$stage/package.json"
           cd "$stage"
           git init -q -b release
           git config user.name "github-actions[bot]"
