@@ -28,8 +28,70 @@ Unit tests, browser tests, lint, typecheck and build run on every push. The
 browser tests run again against each published copy, because that is the one
 people look at.
 
-It has **not** been run inside React or the wallet yet, which is the point of
-it, and no screen reader has heard it. See **Open questions**.
+It has run inside the LCW web wallet, in dev and production builds, with plain
+and encrypted collections (lcw-front-end#104). That pull request was closed in
+favour of the wallet's plugin interface, which this package now follows: see
+**Using it in the LCW web wallet**. No screen reader has heard it yet. See
+**Open questions**.
+
+## Using it in the LCW web wallet
+
+The wallet's plugin guide is
+[lcw-front-end `docs/plugins.md`](https://github.com/digitalcredentials/lcw-front-end/blob/main/docs/plugins.md).
+This package follows it as a web-component plugin.
+
+**Install.** From the `release` branch, which `.github/workflows/release.yml`
+rebuilds from every push to `main`:
+
+```json
+"@digitalcredentials/verifier-plugin": "github:digitalcredentials/verifier-plugin#release"
+```
+
+`npm install` runs none of this package's scripts, and verifier-core is bundled
+into `dist/`, so the wallet installs nothing else. `npm update
+@digitalcredentials/verifier-plugin` moves the lock file to the latest build.
+
+**Register.** Importing the package registers `<verifier-credential>` and tells
+the wallet's JSX about it, so the wallet needs no type declarations of its own.
+The credential detail slot:
+
+```tsx
+// src/plugins/Verifier.tsx
+import '@digitalcredentials/verifier-plugin';
+import type { Registry } from '@digitalcredentials/verifier-plugin';
+import type { WalletHost } from './types';
+
+// The wallet's trust list is its own configuration, passed in as a property.
+const registries: Registry[] = [
+  { name: 'DCC Sandbox Registry', type: 'dcc-legacy', url: 'https://digitalcredentials.github.io/sandbox-registry/registry.json' },
+];
+
+export function VerifierDetail({ credential }: { credential: Record<string, unknown> | null; host: WalletHost }) {
+  return <verifier-credential credential={credential ?? undefined} registries={registries} />;
+}
+```
+
+The wallet's `WalletPlugin` also requires a page of its own (`Component`); see
+the guide, section 5.
+
+**Properties**, set as properties, not attributes (React 19 does this for a
+custom element that defines them):
+
+| Property | |
+|---|---|
+| `credential` | The credential to show and check. Setting it checks it; `undefined` clears the card. |
+| `registries` | The registries to look the issuer up in, as `Registry[]`. Defaults to the DCC Sandbox Registry. Changing it checks again. |
+| `registriesUnavailable` | Set when the wallet couldn't get its list of registries. The issuer is then not looked up, and the card says the list didn't load. Use this, not `registries = []`: an empty list names nobody, so every issuer would read as not on it. |
+
+**Events**, bubbling and composed: `verification-started` `{ credential }`,
+`verification-complete` `{ outcome, checks, response }`, `verification-failed`
+`{ error }`.
+
+**Styling.** It draws in a shadow root with its own styles. To match the
+wallet's palette, set any of these CSS custom properties on the element:
+`--vp-surface`, `--vp-surface-2`, `--vp-ink`, `--vp-ink-2`, `--vp-ink-3`,
+`--vp-rule`, `--vp-rule-strong`, `--vp-accent`, `--vp-ok`, `--vp-warn`,
+`--vp-bad`, `--vp-unk`, `--vp-font`, `--vp-mono`.
 
 ## Decisions so far
 
@@ -156,16 +218,20 @@ A first slice: a real credential in, real verification, one card out.
 | `src/credential.ts` | Pulls out the few fields we display |
 | `src/verifier-credential.ts` | The `<verifier-credential>` web component |
 | `src/index.ts` | The public surface |
+| `src/jsx.ts` | Tells a React host's JSX about `<verifier-credential>`; types only |
 | `test/outcomes.test.ts` | The mapping, and the ways a good credential can be made to look bad |
 | `test/consistency.test.ts` | 1,500 combinations asserting the headline and the breakdown can never disagree |
 | `test/browser/states.spec.ts` | Drives the component in a real browser, locally or against a published copy |
+| `test/types/jsx.tsx` | Type test: a React host can write `<verifier-credential>` once it imports the package |
 | `scripts/make-fixtures.js` | Builds the test credentials, really signed |
 | `scripts/build-site.js` | Builds the demo page for a published address, with credentials signed for it |
 | `.github/workflows/preview.yml` | Publishes `main` and each PR to GitHub Pages, then tests the published copy |
+| `.github/workflows/release.yml` | Builds `main` into the `release` branch the wallet installs from |
 
 ```
 npm install
 npm test            # the mapping, without a browser
+npm run typecheck   # types, including what a React host sees
 npm run test:browser  # the component, in Chromium, verifying for real
 npm run dev         # look at it
 npm run fixtures    # rebuild the test credentials
@@ -254,8 +320,9 @@ itself, and refuses preflights the way GitHub Pages does.
 - **How much does it own?** Displaying the credential, displaying the
   verification, and running the verification. Nate's read, and it's what this
   does.
-- **The formal plugin interface** is being worked out separately, with the
-  community. Whatever gets built here should expect to adapt.
+- **The formal plugin interface** is now written down for the LCW web wallet
+  in lcw-front-end `docs/plugins.md`, and this package follows it. James calls
+  it a start, so expect it to change.
 
 **Settled since**: a credential with no withdrawal list now says so, in the
 details only. Nothing failed and there was nothing to try, so it reads as no

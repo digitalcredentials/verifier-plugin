@@ -1,0 +1,12 @@
+{
+  // Only the type test: src comes in through its imports, as it does for a
+  // host app, so the test fails if index.ts stops importing jsx.ts.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "emitDeclarationOnly": false,
+    "rootDir": "."
+  },
+  "include": ["test/types"]
+}

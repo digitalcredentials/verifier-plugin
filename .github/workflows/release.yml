@@ -1,0 +1,82 @@
+name: Release branch
+
+# Builds dist/ from every push to main and writes it, with package.json,
+# LICENSE and README.md, to the `release` branch. A wallet depends on
+# "github:digitalcredentials/verifier-plugin#release" and installs the built
+# package without running any script of ours at install time
+# (lcw-front-end docs/plugins.md, section 4). Copied from batch-issuer-ui's
+# .github/workflows/release.yml, the reference that guide names.
+#
+# Two jobs on purpose: `npm ci` runs every dependency's install scripts, so
+# the job that runs it holds no token that can write; the job that pushes
+# installs nothing.
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      # verifier-core is a git dependency whose `prepare` script builds with
+      # pnpm; see ci.yml. It is bundled into dist, so the wallet never
+      # installs it.
+      - run: corepack enable
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+          retention-days: 1
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # to push the release branch
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      BUILT_FROM: ${{ github.sha }}
+    steps:
+      # package.json, LICENSE and README.md come from the commit that was built
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+      - name: Push the built package to the release branch
+        shell: bash
+        run: |
+          set -eu
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+
+          # A re-run of an older run must not put old code over new: only
+          # the build of main's current tip is pushed.
+          tip=$(git ls-remote "$remote" refs/heads/main | cut -f1)
+          if [ "$tip" != "$BUILT_FROM" ]; then
+            echo "main has moved on to $tip; not publishing $BUILT_FROM."
+            exit 0
+          fi
+
+          stage="$RUNNER_TEMP/release"
+          mkdir -p "$stage"
+          cp -R dist package.json LICENSE README.md "$stage/"
+          cd "$stage"
+          git init -q -b release
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Build of ${BUILT_FROM}"
+          git push --force "$remote" release
+          echo "Pushed the build of ${BUILT_FROM} to the release branch."
