@@ -1440,6 +1440,10 @@ describe('a suspended credential', () => {
 });
 
 describe('a withdrawal list signed by someone other than the issuer', () => {
+  // The first two and the last are shapes verifier-core's main can't produce
+  // yet: a mark ends its status suite before the signer is compared, so the
+  // mismatch arrives only for a list that passed. They pin the rules for when
+  // it does. The third is the case it reports today.
   it('is not repeated when it says "withdrawn"', () => {
     const r = ok();
     set(r, revokedBy(PROBLEM.revoked, 'Credential Revoked'));
@@ -1629,5 +1633,45 @@ describe('checks verifier-core stopped before, after a fatal signature failure',
     const id = issuerIdentity(r);
     expect(id.source).toBe('unknown');
     expect(issuerMarker(id.source, id.sealHeld)).toBe('unconfirmed');
+  });
+});
+
+describe('findings from the review of the verifier-core main adaptation', () => {
+  const NOT_RUN = (id: string) => `Not run: ${id} failed`;
+
+  it('leads with an unchecked seal, not with the withdrawal check it stopped', () => {
+    const r = ok();
+    set(r, fail(CHECK.signature, [{ type: PROBLEM.proofVerification, title: 'No Applicable Crypto Service', detail: 'x' }], true));
+    set(r, skip(CHECK.status, NOT_RUN('proof.signature')));
+    expect(summarise(r).code).toBe('signature_unchecked');
+  });
+
+  it.each([
+    [PROBLEM.didWebUnresolved, 'did_web_unresolved'],
+    [PROBLEM.httpError, 'http_error_with_signature_check'],
+  ])('names %s now the library reports it', (type, code) => {
+    const r = ok();
+    set(r, fail(CHECK.signature, [{ type, title: 't', detail: 'd' }], true));
+    set(r, skip(CHECK.status, NOT_RUN('proof.signature')));
+    const out = summarise(r);
+    expect(out).toMatchObject({ code, severity: 'unchecked' });
+    expect(out.detail).not.toMatch(/tamper/i);
+  });
+
+  it('says the issuer was not checked after the withdrawal check stopped everything', () => {
+    const r = ok();
+    set(r, revokedBy(PROBLEM.revoked, 'Credential Revoked'));
+    set(r, skip(CHECK.registeredIssuer, NOT_RUN('status.bitstring')));
+    expect(summarise(r).code).toBe('withdrawn');
+    expect(row(r, CHECK.registeredIssuer)?.value).toBe('Springfield College — not checked');
+  });
+
+  it('stops early on a credential that fails the structure check, and blames how it was issued', () => {
+    const r = stoppedAt(CHECK.vcStructure, 'Invalid Credential Structure');
+    expect(listChecks(r)).toEqual([]);
+    const out = summarise(r);
+    expect(out).toMatchObject({ code: 'invalid_structure', severity: 'error' });
+    expect(out.detail).not.toContain('our end');
+    expect(out.action).not.toContain('Try again');
   });
 });

@@ -151,6 +151,10 @@ export const stoppedEarly = (r: VerificationResponse): boolean => {
     CHECK.envelope,
     CHECK.contextExists,
     CHECK.vcContext,
+    // Fatal since verifier-core's core suite grew a structure check. Missing
+    // here, a credential with an unreadable date halted every later check and
+    // read "a problem at our end, try again", which can never help.
+    CHECK.vcStructure,
     CHECK.credentialId,
     CHECK.proofExists,
   ].some((id) => checks.get(id)?.outcome.status === 'failure');
@@ -266,10 +270,17 @@ const anyUnreachable = (check: CheckResult | undefined): boolean =>
  * Whether the withdrawal list is someone else's.
  *
  * verifier-core reports it from its own check, after the list has loaded and
- * been read, and leaves the withdrawal check's own result as it was. So a list
- * signed by a stranger can still arrive as "withdrawn" or as a clean pass, and
- * neither is the issuer's word. See PROBLEM.statusListIssuerMismatch for why
- * we repeat neither.
+ * been read, and leaves the withdrawal check's own result as it was. See
+ * PROBLEM.statusListIssuerMismatch for why we repeat neither answer.
+ *
+ * Only half of it reaches us today. A clean pass from a stranger's list is
+ * reported, and reads "we couldn't check". A *mark* on one is not: the
+ * withdrawal check is fatal, so a mark ends the status suite before the signer
+ * is compared, and the list-issuer check arrives "Not run". A stranger's
+ * "withdrawn" therefore still reads as the issuer's, and nothing in the result
+ * can tell the two apart (verifier-core, raised 7 October 2026). The rules
+ * below already treat a reported mismatch on a mark correctly, so the fix
+ * lands here unchanged when upstream reports it.
  */
 const listNotIssuers = (checks: Map<string, CheckResult>): boolean =>
   hasProblem(checks.get(CHECK.statusListIssuer), PROBLEM.statusListIssuerMismatch);
@@ -628,6 +639,13 @@ const FATAL: Record<string, Omit<Outcome, 'code'>> = {
     detail: "It's structured, but it doesn't say it's a verifiable credential.",
     action: 'Ask whoever sent it for the original file.',
   },
+  invalid_structure: {
+    severity: 'error',
+    headline: "We can't check this credential",
+    detail:
+      "It isn't put together the way credentials are required to be, so it couldn't be checked. That's a problem with how it was issued.",
+    action: 'Ask the issuer for a replacement.',
+  },
   invalid_credential_id: {
     severity: 'error',
     headline: "We can't check this credential",
@@ -669,14 +687,12 @@ const FATAL: Record<string, Omit<Outcome, 'code'>> = {
   // The two below mean we could not find out — not that anything is wrong.
   // Conflating them with invalid_signature is the worst mistake available.
   //
-  // Both are currently UNREACHABLE against verifier-core 2.x, which reports a
-  // transport failure and an unresolvable did:web as the same
-  // PROOF_VERIFICATION_ERROR as everything else the proof suite cannot
-  // complete. They fall to `signature_unchecked`, whose wording is the more
-  // general version of the same thing, so nothing false is shown — only
-  // something less specific. Kept, with their wording, for when upstream
-  // distinguishes them; we have no did:web fixture to exercise either path
-  // regardless.
+  // verifier-core's main reports both by type (DID_WEB_UNRESOLVED,
+  // HTTP_ERROR) from its crypto service. Not every case, though: a did:web
+  // document that answers 404 still arrives as INVALID_SIGNATURE ("Failed to
+  // fetch DID document: HTTP 404", read off the library on 7 October 2026),
+  // and so still reads as tampering. That is upstream's to fix; reading the
+  // sentence here would bring back the prose-matching this file just shed.
   http_error_with_signature_check: {
     severity: 'unchecked',
     headline: "We couldn't finish checking this",
@@ -797,6 +813,8 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
     // unrecognised name leaking through into our catalogue was the risk then.
     const code = failed(checks.get(CHECK.vcContext))
       ? 'no_vc_context'
+      : failed(checks.get(CHECK.vcStructure))
+        ? 'invalid_structure'
       : failed(checks.get(CHECK.credentialId))
         ? 'invalid_credential_id'
         : failed(checks.get(CHECK.proofExists))
@@ -852,6 +870,10 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
   // Expiry sits below withdrawal deliberately. A credential that was withdrawn
   // *and* has since run out is withdrawn: the issuer has already decided, and
   // "ask whether it can be renewed" would bury that behind a lesser finding.
+  // verifier-core's main can't currently tell us both: expiry is fatal, so the
+  // withdrawal list is never read and an expired credential reads "Expired"
+  // whether or not it was withdrawn. Its reassurance then makes no withdrawal
+  // claim. The order still stands for when both are reported.
   if (isExpired(checks)) {
     // Name the date. How stale it is changes what someone does about it, and
     // "eight months ago" is vaguer than a date when a qualification is at
@@ -933,6 +955,19 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
   //
   // A list signed by someone other than the issuer lands here too, whatever it
   // said: withdrawn, suspended or clear, it isn't the issuer's word.
+  //
+  // An unchecked seal outranks all of these: it is the more serious unknown,
+  // and verifier-core halts the withdrawal check after it, so "the withdrawal
+  // check never ran" would be true but beside the point.
+  if (!passed(signature) && !sealHeld(checks)) {
+    const code = hasProblem(signature, PROBLEM.didWebUnresolved)
+      ? 'did_web_unresolved'
+      : hasProblem(signature, PROBLEM.httpError)
+        ? 'http_error_with_signature_check'
+        : undefined;
+    return code ? { code, ...FATAL[code]! } : { code: 'signature_unchecked', ...UNCHECKED_SIGNATURE };
+  }
+
   const revocationError = withdrawalUnavailable(revocation);
   if (hasStatusList(r) && !notWithdrawn(checks)) {
     if (listNotIssuers(checks)) {
@@ -1107,12 +1142,12 @@ export const listChecks = (r: VerificationResponse, options: OutcomeOptions = {}
           : "can't confirm — we couldn't check the digital seal"
       : issuer.source === 'registry'
         ? `${issuer.name} — a known issuer`
-        : issuer.registriesUnreachable
-          ? `${issuer.name} — we couldn't load our list of known issuers`
-          : // Only after the signature failed, which is the only thing that
-            // halts it. Otherwise the headline's account of the lookup stands.
-            failed(signature) && halted(checks.get(CHECK.registeredIssuer))
-            ? `${issuer.name} — not checked`
+        : // Before the list's own account: a lookup an earlier failure
+          // stopped would not have run whether the list loaded or not.
+          halted(checks.get(CHECK.registeredIssuer))
+          ? `${issuer.name} — not checked`
+          : issuer.registriesUnreachable
+            ? `${issuer.name} — we couldn't load our list of known issuers`
           : issuer.source === 'unknown'
             ? `${issuer.name} — we couldn't finish checking our list of known issuers`
           : issuer.source === 'none'

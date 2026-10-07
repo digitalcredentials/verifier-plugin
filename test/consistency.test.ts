@@ -92,6 +92,9 @@ type Sig = 'passed' | 'tampered' | 'expired' | 'not_yet_valid' | 'key_mismatch' 
  * `unreadable`: a status type the library does not recognise, so it skips.
  * `+other`: the list loaded and was read, but the issuer didn't sign it — the
  * status check's own result is untouched, and a second check reports it.
+ * verifier-core's main reports that only for a list that passed; after a mark
+ * the second check is "Not run". `revoked+other` and `suspended+other` are
+ * here for when it does, so the rules are ready rather than merely untested.
  */
 type Rev =
   | 'passed'
@@ -429,11 +432,28 @@ const build = (sig: Sig, rev: Rev, end: End, iss: Iss, sch: Sch): VerificationRe
  */
 const HOST_LIST: ('loaded' | 'unavailable')[] = ['loaded', 'unavailable'];
 
+/**
+ * A check is only ever skipped as "not run" because one before it failed
+ * fatally: the signature for everything after it, the withdrawal check for
+ * the issuer lookup and the schema. A `halted` check with nothing failed
+ * ahead of it is a contradiction in the input, not a combination the rules
+ * owe an answer to, so it is left out — everything else, possible or not,
+ * stays in.
+ */
+const SIG_FATAL: Sig[] = ['tampered', 'expired', 'not_yet_valid', 'key_mismatch', 'unattributable'];
+const REV_FATAL: Rev[] = ['revoked', 'suspended', 'revoked+other', 'suspended+other', 'list_error'];
+const coherent = (sig: Sig, rev: Rev, iss: Iss, sch: Sch): boolean => {
+  const before = SIG_FATAL.includes(sig);
+  if (rev === 'halted' && !before) return false;
+  const beforeLater = before || REV_FATAL.includes(rev);
+  return (iss !== 'halted' && sch !== 'halted') || beforeLater;
+};
+
 const cases = SIGNATURES.flatMap((sig) =>
   REVOCATIONS.flatMap((rev) =>
     ENDS.flatMap((end) =>
       ISSUERS.flatMap((iss) =>
-        SCHEMAS.flatMap((sch) =>
+        SCHEMAS.filter((sch) => coherent(sig, rev, iss, sch)).flatMap((sch) =>
           HOST_LIST.map((list) => ({ sig, rev, end, iss, sch, list, name: `${sig}/${rev}/${end}/${iss}/${sch}/${list}` })),
         ),
       ),
@@ -542,11 +562,29 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
       ).toBe(true);
     }
 
+    // A check that never ran says so, and gives no other reason: not "the
+    // list didn't load", not "couldn't load the standard". Severities can't
+    // see this — both read "unchecked". The one exception is the Issuer row
+    // when the seal failed, which talks about the seal instead (James, 1
+    // October 2026): that is the reason, and it outranks the lookup.
+    const haltedRows = [
+      rev === 'halted' && CHECK.status,
+      iss === 'halted' && CHECK.registeredIssuer,
+      sch === 'halted' && CHECK.schema,
+    ].filter((id): id is string => typeof id === 'string');
+    for (const id of haltedRows) {
+      const value = row(id)?.value ?? '';
+      const aboutTheSeal = id === CHECK.registeredIssuer && value.startsWith("can't confirm — ");
+      expect(aboutTheSeal || /(^|— )not checked$/.test(value), `${where}: "${row(id)?.label}" never ran, but reads "${value}"`).toBe(true);
+    }
+
     // Each verdict must be borne out by the row it is about.
     const expectations: Record<string, [string, string] | undefined> = {
       verified: [CHECK.signature, 'success'],
       invalid_signature: [CHECK.signature, 'error'],
       signature_unchecked: [CHECK.signature, 'unchecked'],
+      did_web_unresolved: [CHECK.signature, 'unchecked'],
+      http_error_with_signature_check: [CHECK.signature, 'unchecked'],
       withdrawn: [CHECK.status, 'error'],
       suspended: [CHECK.status, 'error'],
       withdrawal_unknown: [CHECK.status, 'unchecked'],
@@ -595,6 +633,7 @@ describe('verification that stopped early', () => {
     [CHECK.contextExists, 'Invalid JSON-LD', 'unreadable_vocabulary'],
     [CHECK.contextExists, 'Missing Context', 'invalid_jsonld'],
     [CHECK.vcContext, 'Not a Verifiable Credential', 'no_vc_context'],
+    [CHECK.vcStructure, 'Invalid Credential Structure', 'invalid_structure'],
     [CHECK.credentialId, 'Invalid Credential Id', 'invalid_credential_id'],
     [CHECK.proofExists, 'No Proof', 'no_proof'],
   ];

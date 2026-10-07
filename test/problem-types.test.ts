@@ -51,8 +51,12 @@ describe('what verifier-core reports, by type', () => {
 describe('what a person is told, end to end', () => {
   it('tells someone whose credential ran out that it expired, names the date, and says the seal held', async () => {
     const r = await verify(fixture('expired'));
-    expect(summarise(r)).toMatchObject({ code: 'expired', severity: 'warning', headline: 'Expired on 9 January 2026' });
-    expect(listChecks(r).find((c) => c.id === CHECK.signature)).toMatchObject({ severity: 'success', value: 'none detected' });
+    const out = summarise(r);
+    expect(out).toMatchObject({ code: 'expired', severity: 'warning', headline: 'Expired on 9 January 2026' });
+    expect(out.action).toContain('renewed');
+    const rows = listChecks(r);
+    expect(rows.find((c) => c.id === `${CHECK.signature}#dates`)).toMatchObject({ severity: 'warning', value: 'expired on 9 January 2026' });
+    expect(rows.find((c) => c.id === CHECK.signature)).toMatchObject({ severity: 'success', value: 'none detected' });
   });
 
   it('tells someone whose credential has not started yet when it does', async () => {
@@ -61,7 +65,11 @@ describe('what a person is told, end to end', () => {
   });
 
   it('tells someone whose credential was altered that it was tampered with', async () => {
-    expect(summarise(await verify(fixture('tampered')))).toMatchObject({ code: 'invalid_signature', severity: 'error' });
+    expect(summarise(await verify(fixture('tampered')))).toMatchObject({
+      code: 'invalid_signature',
+      severity: 'error',
+      headline: 'This credential has been tampered with',
+    });
   });
 
   it('does not call a seal made with someone else’s key tampering', async () => {
@@ -83,5 +91,15 @@ describe('what a person is told, end to end', () => {
     expect(signatureTypes(r)).toEqual([PROBLEM.invalidSignature]);
     expect(summarise(r).code).toBe('invalid_signature');
     expect(listChecks(r).find((c) => c.id === CHECK.signature)?.value).toBe('detected');
+  });
+});
+
+describe('a credential the library rejects for its shape', () => {
+  it('stops at the structure check, and says so rather than blaming us', async () => {
+    const c = fixture('withdrawn');
+    c['validFrom'] = 'last Tuesday';
+    const r = await verify(c);
+    expect((r.results ?? []).find((x) => x.id === CHECK.vcStructure)?.outcome.status).toBe('failure');
+    expect(summarise(r).code).toBe('invalid_structure');
   });
 });

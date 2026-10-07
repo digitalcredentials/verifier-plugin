@@ -108,6 +108,11 @@ export const CHECK = {
   envelope: 'cryptographic.parsing.envelope',
   contextExists: 'cryptographic.core.context-exists',
   vcContext: 'cryptographic.core.vc-context',
+  /**
+   * The credential's shape against the VC data model: dates that parse, a
+   * status entry with a type, and so on. Fatal, like the other core checks.
+   */
+  vcStructure: 'cryptographic.core.vc-structure',
   credentialId: 'cryptographic.core.credential-id',
   proofExists: 'cryptographic.core.proof-exists',
   signature: 'cryptographic.proof.signature',
@@ -145,6 +150,10 @@ export const PROBLEM = {
    */
   verificationMethod: 'https://www.w3.org/TR/vc-data-model#VERIFICATION_METHOD_ERROR',
   proofVerification: 'https://www.w3.org/TR/vc-data-model#PROOF_VERIFICATION_ERROR',
+  /** The issuer's did:web document could not be fetched or read. */
+  didWebUnresolved: 'https://www.w3.org/TR/vc-data-model#DID_WEB_UNRESOLVED',
+  /** Something the signature check needed would not load. */
+  httpError: 'https://www.w3.org/TR/vc-data-model#HTTP_ERROR',
   issuerNotRegistered: 'https://www.w3.org/TR/vc-data-model#ISSUER_NOT_REGISTERED',
   registryUnchecked: 'https://www.w3.org/TR/vc-data-model#REGISTRY_UNCHECKED',
   schemaValidationFailed: 'https://www.w3.org/TR/vc-data-model#SCHEMA_VALIDATION_FAILED',

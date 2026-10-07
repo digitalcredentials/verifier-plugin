@@ -102,8 +102,9 @@ const devHttpGetService = {
  *
  * Confirmed in a browser on 1 October 2026, against the real GitHub Pages: a
  * page on localhost found the published Withdrawn credential withdrawn and Not
- * withdrawn clear. The browser tests now cover it against a server that
- * refuses preflights the same way (test/browser/pages-like-server.js). And
+ * withdrawn clear. The browser tests covered it against a server that
+ * refuses preflights the same way (test/browser/pages-like-server.js) until
+ * they moved to the dev-only fetcher below, which is also a bare GET. And
  * the status list does go through the built-in service: patched to send a
  * custom header, it makes the withdrawal check fail with
  * STATUS_LIST_NOT_FOUND (tried by hand on 1 October, not a standing test).
@@ -122,7 +123,12 @@ export const verify = async (
     // and outcomes.ts reads the same flag to say the list didn't load.
     ...(options.registriesUnavailable ? {} : { registries: registries as never }),
 
-    // Dev server and browser tests only; see devHttpGetService.
+    // Dev server and browser tests only; see devHttpGetService. Note what that
+  // costs: the cross-site tests (pages-like-server.js, which refuses CORS
+  // preflights as GitHub Pages does) now exercise this fetcher, not the
+  // built-in one. Both send a bare GET with no custom headers, so neither
+  // triggers a preflight (read off the library, 7 October 2026) — but only a
+  // run against a published copy exercises the built-in one for real.
     ...(import.meta.env.DEV ? { httpGetService: devHttpGetService } : {}),
 
     // 2.x defaults this to false, which drops every check that passed and

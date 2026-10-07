@@ -289,7 +289,8 @@ const main = async () => {
   // Not marked on it: the case verifier-core reports. A mark would end its
   // status suite at the withdrawal check, which is fatal, before the check
   // that compares the list's signer runs — so a stranger's "withdrawn" still
-  // reads as the issuer's. Raised upstream; outcomes.ts already handles both.
+  // reads as the issuer's, and nothing in the result says otherwise (raised
+  // upstream). outcomes.ts handles that case too, once the library reports it.
   await write(
     'list-not-issuers',
     await sign(
