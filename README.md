@@ -49,9 +49,9 @@ rebuilds from every push to `main`:
 
 The release branch's `package.json` has no scripts and no devDependencies, so
 `npm install` builds nothing and runs nothing of ours, and verifier-core is
-bundled into `dist/`, so the wallet installs nothing else. (npm *builds* a git
-dependency whose `package.json` has a `build` script, installing all its
-devDependencies first; that is why the workflow strips them.) `npm update
+bundled into `dist/`, so the wallet installs nothing else. (npm installs all
+the devDependencies of a git dependency whose `package.json` has a `build`,
+`install` or `prepare` script; that is why the workflow strips them.) `npm update
 @digitalcredentials/verifier-plugin` moves the lock file to the latest build.
 
 **Register.** Importing the package registers `<verifier-credential>` and tells

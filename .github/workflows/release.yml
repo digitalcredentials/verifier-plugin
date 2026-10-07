@@ -16,7 +16,8 @@ on:
     branches: [main]
 
 # One publish at a time, so two quick pushes can't race between the tip check
-# and the force-push. Queued, not cancelled: the tip check skips stale ones.
+# and the force-push. Newer runs wait; a waiting run may be replaced by a newer
+# one, which is harmless since the tip check would have skipped it.
 concurrency:
   group: release
   cancel-in-progress: false
@@ -82,10 +83,10 @@ jobs:
           stage="$RUNNER_TEMP/release"
           mkdir -p "$stage"
           cp -R dist LICENSE README.md "$stage/"
-          # npm builds a git dependency on install when its package.json has a
-          # build, prepare or install script, by installing every
-          # devDependency first: vite, Playwright, and verifier-core from git,
-          # whose own build needs pnpm. So the release package.json carries no
+          # npm prepares a git dependency whose package.json has a build,
+          # prepare or install script by installing all its devDependencies:
+          # vite, Playwright, and verifier-core from git, whose own install
+          # builds with pnpm. So the release package.json carries no
           # scripts and no devDependencies, and nothing runs on install. Not
           # `engines` either: dist is browser code, and Node 24 is only what
           # building it needs.
