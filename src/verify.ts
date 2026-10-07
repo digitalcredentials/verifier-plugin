@@ -124,11 +124,11 @@ export const verify = async (
     ...(options.registriesUnavailable ? {} : { registries: registries as never }),
 
     // Dev server and browser tests only; see devHttpGetService. Note what that
-  // costs: the cross-site tests (pages-like-server.js, which refuses CORS
-  // preflights as GitHub Pages does) now exercise this fetcher, not the
-  // built-in one. Both send a bare GET with no custom headers, so neither
-  // triggers a preflight (read off the library, 7 October 2026) — but only a
-  // run against a published copy exercises the built-in one for real.
+    // costs: the cross-site tests (pages-like-server.js, which refuses CORS
+    // preflights as GitHub Pages does) now exercise this fetcher, not the
+    // built-in one. Both send a bare GET with no custom headers, so neither
+    // triggers a preflight (read off the library, 7 October 2026) — but only a
+    // run against a published copy exercises the built-in one for real.
     ...(import.meta.env.DEV ? { httpGetService: devHttpGetService } : {}),
 
     // 2.x defaults this to false, which drops every check that passed and

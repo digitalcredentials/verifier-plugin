@@ -687,12 +687,14 @@ const FATAL: Record<string, Omit<Outcome, 'code'>> = {
   // The two below mean we could not find out — not that anything is wrong.
   // Conflating them with invalid_signature is the worst mistake available.
   //
-  // verifier-core's main reports both by type (DID_WEB_UNRESOLVED,
-  // HTTP_ERROR) from its crypto service. Not every case, though: a did:web
-  // document that answers 404 still arrives as INVALID_SIGNATURE ("Failed to
-  // fetch DID document: HTTP 404", read off the library on 7 October 2026),
-  // and so still reads as tampering. That is upstream's to fix; reading the
-  // sentence here would bring back the prose-matching this file just shed.
+  // verifier-core's main has types for both (DID_WEB_UNRESOLVED,
+  // HTTP_ERROR), but in practice almost never uses them: its classifier
+  // recognises only an error named `HTTPError`, and its own fetcher and
+  // did:web resolver throw plain errors. So a did:web document that answers
+  // 404, or a host that doesn't answer at all, arrives as INVALID_SIGNATURE
+  // and reads as tampering (verified against the library, 7 October 2026). A
+  // false accusation against an honest credential, upstream's to fix; reading
+  // the sentence here would bring back the prose-matching this file shed.
   http_error_with_signature_check: {
     severity: 'unchecked',
     headline: "We couldn't finish checking this",
