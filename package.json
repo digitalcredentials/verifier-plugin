@@ -10,15 +10,21 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./dist/index.js",
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE",
+    "README.md"
   ],
   "scripts": {
     "dev": "vite",
     "build": "vite build && tsc -b",
+    "typecheck": "tsc --noEmit -p . && tsc -p tsconfig.types.json",
     "build:site": "node scripts/build-site.js",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -34,6 +40,7 @@
     "@digitalcredentials/vc-bitstring-status-list": "^1.0.0",
     "@digitalcredentials/verifier-core": "github:digitalcredentials/verifier-core#d217b042371096e84b8cd0046fbe79a667683d8a",
     "@playwright/test": "^1.63.0",
+    "@types/react": "^19.3.0",
     "oxlint": "^1.75.0",
     "typescript": "~6.0.2",
     "vite": "^8.2.0",
