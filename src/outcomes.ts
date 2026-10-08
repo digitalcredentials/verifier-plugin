@@ -742,13 +742,17 @@ const UNCHECKED_SIGNATURE: Omit<Outcome, 'code'> = {
  * than anything unearned. `test/consistency.test.ts` asserts the claim
  * against the rows, in prose, because severities cannot see this: both
  * sides read "unchecked" and agree perfectly while the sentence lies.
+ *
+ * "The issuer hasn't deactivated it" only when it could have been and the
+ * check came back clear. For a credential the issuer set up no way to
+ * deactivate, saying so implied they could have (8 October 2026).
  */
 const reassurance = (
   r: VerificationResponse,
   checks: Map<string, CheckResult>,
 ): string => {
   if (!sealHeld(checks)) return '';
-  return !hasStatusList(r) || notWithdrawn(checks)
+  return hasStatusList(r) && notWithdrawn(checks)
     ? " It hasn't been tampered with, and the issuer hasn't deactivated it."
     : " It hasn't been tampered with.";
 };
@@ -1059,7 +1063,7 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
       severity: 'unchecked',
       code: 'issuer_unconfirmed',
       headline: "Genuine, but we can't confirm who issued it",
-      detail: `It hasn't been tampered with, and the issuer hasn't deactivated it. ${says}`,
+      detail: `${reassurance(r, checks).trim()} ${says}`,
     };
   }
 
@@ -1079,7 +1083,7 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
     severity: 'success',
     code: 'verified',
     headline: 'Verified',
-    detail: "It hasn't been tampered with, and the issuer hasn't deactivated it.",
+    detail: reassurance(r, checks).trim(),
   };
 };
 

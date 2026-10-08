@@ -394,6 +394,27 @@ describe('a credential with no way to be withdrawn', () => {
     expect(withdrawal!.severity).not.toBe('error');
   });
 
+  it('does not say the issuer hasn\'t deactivated what it set up no way to deactivate', () => {
+    // "Hasn't deactivated it" beside "no way to deactivate this" implied the
+    // issuer could have (8 October 2026).
+    expect(summarise(noStatus())).toMatchObject({ code: 'verified', detail: "It hasn't been tampered with." });
+    const unlisted = noStatus();
+    set(unlisted, notRegistered());
+    const out = summarise(unlisted);
+    expect(out.code).toBe('issuer_unconfirmed');
+    expect(out.detail).toMatch(/^It hasn't been tampered with\. It says it was issued by Springfield College\./);
+  });
+
+  it('does say it when the issuer could have and the check came back clear', () => {
+    const full = "It hasn't been tampered with, and the issuer hasn't deactivated it.";
+    expect(summarise(ok())).toMatchObject({ code: 'verified', detail: full });
+    const unlisted = ok();
+    set(unlisted, notRegistered());
+    const out = summarise(unlisted);
+    expect(out.code).toBe('issuer_unconfirmed');
+    expect(out.detail.startsWith(`${full} It says it was issued by Springfield College.`)).toBe(true);
+  });
+
   it('never labels a row with a claim that could be read as the finding', () => {
     // "Withdrawn by issuer" reads as a statement the moment its value stops
     // being a plain yes or no. Labels name the subject; values carry findings.

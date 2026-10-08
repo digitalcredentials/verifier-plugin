@@ -97,9 +97,10 @@ test('an expired credential is a warning, and says what to do', async ({ page })
   expect(c.action).not.toBe('');
   // The headline names the date, so nothing restates it underneath. What
   // does sit there is what reported: the seal held (the library checks dates
-  // after it), and the issuer set up no way to withdraw it.
+  // after it). The issuer set up no way to deactivate it, so "the issuer
+  // hasn't deactivated it" isn't said.
   expect(c.headline).toContain('Expired on');
-  expect(c.detail).toBe("It hasn't been tampered with, and the issuer hasn't deactivated it.");
+  expect(c.detail).toBe("It hasn't been tampered with.");
   expect(c.detail).not.toContain('run out');
 });
 
@@ -195,7 +196,8 @@ test('a credential not valid yet is a warning that says when it will be', async 
   const c = await pick(page, 'Not yet valid');
   expect(c.severity).toBe('warning');
   expect(c.headline).toContain('Not valid until 1 January 2099');
-  expect(c.detail).toBe("It hasn't been tampered with, and the issuer hasn't deactivated it.");
+  // Its test credential has no way to be deactivated, so that half isn't said.
+  expect(c.detail).toBe("It hasn't been tampered with.");
   expect(c.action).toBe('Check it again on or after that date.');
 });
 

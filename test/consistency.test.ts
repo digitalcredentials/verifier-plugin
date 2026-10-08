@@ -576,8 +576,8 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
     if (CLAIMS_NOT_WITHDRAWN.test(claims)) {
       const revRow = row(CHECK.status)!;
       expect(
-        revRow.severity === 'success' || !hasStatusList(r),
-        `${where}: claims it was not withdrawn, but the row says "${revRow.value}"`,
+        revRow.severity === 'success',
+        `${where}: claims it was not deactivated, but the row says "${revRow.value}"`,
       ).toBe(true);
     }
 

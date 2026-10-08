@@ -371,7 +371,10 @@ Some specific changes, all cheap:
   subject rather than a claim, like every other row. Going out to people for
   feedback in this form.
 - **"The issuer hasn't deactivated it,"** rather than "has not been revoked,"
-  for the reason in the "this copy" item above.
+  for the reason in the "this copy" item above. Said only when the issuer set
+  up a way to deactivate it and the check came back clear: beside "the issuer
+  set up no way to deactivate this", it implied they could have (8 October
+  2026).
 - **"Digital signature," explained where it appears.** An average learner
   doesn't know what a signature is *for*, so "this credential has no
   signature" told them nothing. The fix was the explanation, not the word: a
@@ -394,8 +397,9 @@ Some specific changes, all cheap:
   line below a headline has to add something — a reassurance that actually
   reported, or what the finding means — and when there is nothing true to
   add, nothing fills the gap. An expired credential normally does have
-  something: its seal held, so it reads "It hasn't been tampered with, and the
-  issuer hasn't deactivated it." (see §5).
+  something: its seal held, so it reads "It hasn't been tampered with.", adding
+  "and the issuer hasn't deactivated it" only when the issuer set up a way to
+  deactivate it and the check came back clear (see §5).
 - **Relative times.** "Checked 2 hours ago" rather than a full timestamp. The
   exact time can sit in the details. It must not be hover-only, since that
   leaves out keyboard, screen reader and touch users.
@@ -533,6 +537,7 @@ right home for the raw identifier.
 > **ⓘ Genuine, but we can't confirm who issued it**
 >
 > It hasn't been tampered with, and the issuer hasn't deactivated it.
+> *(The second half only when the issuer set up a way to deactivate it and the check came back clear.)*
 >
 > It says it was issued by **Springfield College**. We couldn't confirm that
 > independently — they aren't on our list of known issuers, which is common.
