@@ -285,19 +285,19 @@ on 29–30 September 2026.
   │                                        │
   │  ✓ Verified                            │
   │    It hasn't been tampered with, and   │
-  │    the issuer hasn't withdrawn it.     │
+  │    the issuer hasn't deactivated it.   │
   │                                        │
   │  [ Details | Developer view |  JSON  ] │
   │  Tampering              ✓ none detected│
   │  Issuer      ✓ Springfield College, …  │
-  │  Withdrawal · Dates · How it was built │
+  │  Status · Dates · How it was built     │
   │                                        │
   │  Checked just now                      │
   └────────────────────────────────────────┘
 ```
 
 - **Details** is what the card opens on: the earner's rows in plain words —
-  Tampering, Issuer, Withdrawal, Dates, How it was built. They are always
+  Tampering, Issuer, Status, Dates, How it was built. They are always
   visible; there is no "Show details" any more. When checking stopped early
   (a credential with no signature, say), there is no breakdown to show, and it
   says so. That doesn't mean nothing was looked at: a failure ends only its own
@@ -349,9 +349,17 @@ library's own documentation says otherwise; reported on verifier-core#32.
 
 Some specific changes, all cheap:
 
-- **"Withdrawn," not "revoked."** "Revoked" sounds far more serious than it
-  often is. Say what it means: *this is no longer a valid credential, and a
-  new copy must be obtained from the issuer.*
+- **"This copy" is what gets deactivated, not "revoked" or "withdrawn."**
+  "Revoked" sounds far more serious than it often is, and "the issuer has
+  withdrawn this" read as the achievement being taken away. But revocation
+  and suspension apply to this copy of the credential, which an issuer may
+  deactivate just to replace it, for example to correct a detail (James, 8
+  October 2026). We can't tell which, so a withdrawn credential reads "The
+  issuer has deactivated this copy", says that doesn't always mean the
+  achievement was taken back, and asks for a current copy. A suspended one
+  reads "The issuer has put this copy on hold", which says it may come back
+  without promising it. The Details row is "Status": *active*, *deactivated
+  by the issuer*, *put on hold by the issuer*. On trial; to revisit.
 - **"Tampered with," not "changed since it was issued,"** and not "has a
   valid signature." The team found tampering clearer (30 September 2026), so
   the verdict and the Details row now use the same word: the Tampering row
@@ -361,14 +369,17 @@ Some specific changes, all cheap:
   after it was issued. We can't tell what." beneath it. The row label stays a
   subject rather than a claim, like every other row. Going out to people for
   feedback in this form.
-- **"The issuer hasn't withdrawn it,"** rather than "has not been revoked."
-  "Withdrawn" stays for now; alternatives are being put to the team.
-- **No "signature" in front of the earner.** An average learner doesn't know
-  what a signature is for, so "this credential has no signature" told them
-  nothing. A credential without one now reads "We can't tell if this is
-  genuine — it's missing the issuer's digital seal", and asks for an official
-  copy. "Digital seal" is on trial pending feedback. The word "signature"
-  stays in the developer view, where it is the right one.
+- **"The issuer hasn't deactivated it,"** rather than "has not been revoked,"
+  for the same reason.
+- **"Digital signature," explained where it appears.** An average learner
+  doesn't know what a signature is *for*, so "this credential has no
+  signature" told them nothing. The fix was the explanation, not the word: a
+  credential without one reads "We can't tell if this is genuine — it's
+  missing the issuer's digital signature — the part that proves it came from
+  them and shows whether anyone has tampered with it", and asks for an
+  official copy. "Digital seal" was tried first; James found it less clear
+  than "signed" (8 October 2026), which people know from signing documents
+  online.
 - **No "registry" in front of the earner either.** Registries are what the
   issuer list *is* to us; to the earner it is "our list of known issuers". So
   a recognised issuer reads "Springfield College — a known issuer", an
@@ -383,7 +394,7 @@ Some specific changes, all cheap:
   reported, or what the finding means — and when there is nothing true to
   add, nothing fills the gap. An expired credential normally does have
   something: its seal held, so it reads "It hasn't been tampered with, and the
-  issuer hasn't withdrawn it." (see §5).
+  issuer hasn't deactivated it." (see §5).
 - **Relative times.** "Checked 2 hours ago" rather than a full timestamp. The
   exact time can sit in the details. It must not be hover-only, since that
   leaves out keyboard, screen reader and touch users.
@@ -478,9 +489,9 @@ does not establish that *this* credential came from them — only the signature
 does that. So when the signature doesn't verify, the issuer row names nobody
 and mentions no list. It says only that we can't confirm, and why:
 
-> can't confirm — the digital seal doesn't match
+> can't confirm — the digital signature doesn't match
 
-(or "we couldn't check the digital seal", when the check didn't finish). This
+(or "we couldn't check the digital signature", when the check didn't finish). This
 was "Springfield College is listed in Local Dev Registry, but we can't confirm
 this credential came from them" until James's review on 1 October 2026. He
 made two points. Nobody outside the team knows what a "Local Dev Registry" is.
@@ -520,7 +531,7 @@ right home for the raw identifier.
 
 > **ⓘ Genuine, but we can't confirm who issued it**
 >
-> It hasn't been tampered with, and the issuer hasn't withdrawn it.
+> It hasn't been tampered with, and the issuer hasn't deactivated it.
 >
 > It says it was issued by **Springfield College**. We couldn't confirm that
 > independently — they aren't on our list of known issuers, which is common.

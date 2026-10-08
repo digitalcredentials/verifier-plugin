@@ -171,7 +171,7 @@ describe('summarise', () => {
     expect(out.severity).toBe('error');
     expect(out.code).toBe('withdrawn');
     // Different cause, so different advice. requirements.md §4.
-    expect(out.action).toContain('new copy');
+    expect(out.action).toContain('current copy');
     expect(out.action).not.toContain('fresh copy');
   });
 
@@ -388,7 +388,7 @@ describe('a credential with no way to be withdrawn', () => {
   it('says the issuer set up no way to withdraw it, rather than claiming a failure', () => {
     const rows = listChecks(noStatus());
     const withdrawal = rows.find((c) => c.id === CHECK.status);
-    expect(withdrawal!.value).toContain('no way to withdraw');
+    expect(withdrawal!.value).toContain('no way to deactivate');
     // Nothing failed. There was nothing to try.
     expect(withdrawal!.value).not.toContain('reliable');
     expect(withdrawal!.severity).not.toBe('error');
@@ -432,11 +432,11 @@ describe('a credential with no way to be withdrawn', () => {
     );
     const withdrawal = listChecks(r).find((c) => c.id === CHECK.status);
     expect(withdrawal?.severity).toBe('unchecked');
-    expect(withdrawal?.value).toBe("couldn't check — no reliable withdrawal information");
+    expect(withdrawal?.value).toBe("couldn't check — no reliable status information");
     const out = summarise(r);
     expect(out.code).toBe('withdrawal_unknown');
     expect(out.detail).toBe(
-      "We couldn't get reliable withdrawal information from the issuer, so we can't tell you either way. That's a problem at their end, not with your credential.",
+      "We couldn't get reliable status information from the issuer, so we can't tell you either way. That's a problem at their end, not with your credential.",
     );
     expect(out.action).toBe('Try again in a moment.');
     // The earner doesn't know there is a list; that belongs in the Developer view.
@@ -509,7 +509,7 @@ describe('what an expired credential says', () => {
     const out = summarise(r);
     expect(out.code).toBe('expired');
     expect(out.detail).toBe("It hasn't been tampered with.");
-    expect(out.detail).not.toContain('withdrawn');
+    expect(out.detail).not.toMatch(/withdrawn|deactivated/);
   });
 
   it('never calls a credential untouched when the library reports tampering and expiry together', () => {
@@ -553,7 +553,7 @@ describe('an action names the issuer only when the seal held', () => {
   it('names them when it did', () => {
     const r = ok();
     revoke(r);
-    expect(summarise(r).action).toBe('A new copy must be obtained from Springfield College.');
+    expect(summarise(r).action).toBe('Ask Springfield College for a current copy.');
   });
 
   it('says "the issuer" when the seal never reported', () => {
@@ -562,7 +562,7 @@ describe('an action names the issuer only when the seal held', () => {
     remove(r, CHECK.signature);
     const out = summarise(r);
     expect(out.code).toBe('withdrawn');
-    expect(out.action).toBe('A new copy must be obtained from the issuer.');
+    expect(out.action).toBe('Ask the issuer for a current copy.');
   });
 });
 
@@ -937,7 +937,7 @@ describe('the reassurance beside a finding never outruns the checks', () => {
   it('claims both only when both actually reported', () => {
     const detail = summarise(withSchema(missingProperty)).detail;
     expect(detail).toContain("It hasn't been tampered with");
-    expect(detail).toContain("issuer hasn't withdrawn it");
+    expect(detail).toContain("issuer hasn't deactivated it");
   });
 
   it("does not claim it was not withdrawn when the list didn't load", () => {
@@ -953,7 +953,7 @@ describe('the reassurance beside a finding never outruns the checks', () => {
         ]),
       );
     });
-    expect(summarise(r).detail).not.toContain('withdrawn');
+    expect(summarise(r).detail).not.toMatch(/withdrawn|deactivated/);
     // ...but the part that did report is still said.
     expect(summarise(r).detail).toContain("It hasn't been tampered with");
   });
@@ -964,7 +964,7 @@ describe('the reassurance beside a finding never outruns the checks', () => {
     });
     const detail = summarise(r).detail;
     expect(detail).not.toContain('tampered');
-    expect(detail).not.toContain('withdrawn');
+    expect(detail).not.toMatch(/withdrawn|deactivated/);
     expect(detail).toContain('leaves out details');
   });
 });
@@ -1019,7 +1019,7 @@ describe('a withdrawal check that never ran', () => {
     const out = summarise(unrecognised());
     expect(out.code).toBe('withdrawal_unknown');
     expect(out.severity).toBe('unchecked');
-    expect(out.detail).not.toContain("hasn't withdrawn");
+    expect(out.detail).not.toMatch(/hasn['’]t (?:withdrawn|deactivated)/);
   });
 
   it('does not invent a cause it cannot establish', () => {
@@ -1045,7 +1045,7 @@ describe('a withdrawal check that never ran', () => {
     remove(r, CHECK.status);
     expect(summarise(r).code).toBe('verified');
     expect(listChecks(r).find((c) => c.id === CHECK.status)!.value).toBe(
-      'the issuer set up no way to withdraw this',
+      'the issuer set up no way to deactivate this',
     );
   });
 });
@@ -1184,7 +1184,7 @@ describe('findings from the review of the 2.x migration', () => {
     expect(row?.severity).toBe('unchecked');
     // James, reviewing #16 on 1 October 2026: without the seal, even naming
     // the list the issuer is on lends the credential a name it hasn't earned.
-    expect(row?.value).toBe("can't confirm — the digital seal doesn't match");
+    expect(row?.value).toBe("can't confirm — the digital signature doesn't match");
     expect(row?.value).not.toContain('Springfield College');
     expect(row?.value).not.toMatch(/registry|known issuer/i);
 
@@ -1204,7 +1204,7 @@ describe('findings from the review of the 2.x migration', () => {
     const unsigned = ok();
     remove(unsigned, CHECK.signature);
     const unsignedRow = listChecks(unsigned).find((c) => c.id === CHECK.registeredIssuer);
-    expect(unsignedRow?.value).toBe("can't confirm — we couldn't check the digital seal");
+    expect(unsignedRow?.value).toBe("can't confirm — we couldn't check the digital signature");
   });
 
 
@@ -1428,10 +1428,10 @@ describe('a suspended credential', () => {
     const r = ok();
     set(r, revokedBy(PROBLEM.suspended, 'Credential Suspended'));
     const out = summarise(r);
-    expect(out).toMatchObject({ severity: 'error', code: 'suspended', headline: 'The issuer has suspended this' });
+    expect(out).toMatchObject({ severity: 'error', code: 'suspended', headline: 'The issuer has put this copy on hold' });
     expect(out.detail).toContain('may be temporary');
     expect(out.action).toBe('Ask Springfield College about it.');
-    expect(row(r, CHECK.status)).toMatchObject({ severity: 'error', value: 'suspended by the issuer' });
+    expect(row(r, CHECK.status)).toMatchObject({ severity: 'error', value: 'put on hold by the issuer' });
   });
 
   it('yields to a withdrawal when the credential carries both', () => {
@@ -1444,7 +1444,7 @@ describe('a suspended credential', () => {
       ]),
     );
     expect(summarise(r).code).toBe('withdrawn');
-    expect(row(r, CHECK.status)?.value).toBe('withdrawn by the issuer');
+    expect(row(r, CHECK.status)?.value).toBe('deactivated by the issuer');
   });
 });
 
@@ -1459,14 +1459,14 @@ describe('a withdrawal list signed by someone other than the issuer', () => {
     add(r, listSignedByAnother());
     const out = summarise(r);
     expect(out).toMatchObject({ severity: 'unchecked', code: 'withdrawal_unknown' });
-    expect(out.detail).toContain('The withdrawal information we found may not be from the issuer');
+    expect(out.detail).toContain('The status information we found may not be from the issuer');
     // Retrying cannot fix a list signed by the wrong key.
     expect(out.action).not.toContain('Try again');
     expect(row(r, CHECK.status)).toMatchObject({
       severity: 'unchecked',
       value: "couldn't check — the information we found may not be from the issuer",
     });
-    expect(out.action).toBe("Let Springfield College know we couldn't check whether this has been withdrawn.");
+    expect(out.action).toBe("Let Springfield College know we couldn't check whether this copy is still active.");
     // The earner doesn't know there is a list; that belongs in the Developer view.
     expect(`${out.detail} ${out.action} ${row(r, CHECK.status)?.value}`).not.toMatch(/\blist(s|ed)?\b/i);
   });
@@ -1495,10 +1495,10 @@ describe('a withdrawal list signed by someone other than the issuer', () => {
     add(r, listSignedByAnother());
     const out = summarise(r);
     expect(out.code).toBe('withdrawal_unknown');
-    expect(`${out.headline} ${out.detail}`).not.toMatch(/hasn['’]t withdrawn/);
+    expect(`${out.headline} ${out.detail}`).not.toMatch(/hasn['’]t (?:withdrawn|deactivated)/);
     expect(row(r, CHECK.status)?.severity).toBe('unchecked');
     // The case verifier-core reports today, so pin its wording here too.
-    expect(out.detail).toContain('The withdrawal information we found may not be from the issuer');
+    expect(out.detail).toContain('The status information we found may not be from the issuer');
     expect(`${out.detail} ${out.action} ${row(r, CHECK.status)?.value}`).not.toMatch(/\blist(s|ed)?\b/i);
   });
 
@@ -1539,7 +1539,7 @@ describe('a credential not valid yet', () => {
       severity: 'warning',
       code: 'not_yet_valid',
       headline: 'Not valid until 1 January 2099',
-      detail: "It hasn't been tampered with, and the issuer hasn't withdrawn it.",
+      detail: "It hasn't been tampered with, and the issuer hasn't deactivated it.",
       action: 'Check it again on or after that date.',
     });
     expect(row(r, `${CHECK.signature}#dates`)).toMatchObject({ severity: 'warning', value: 'not valid until 1 January 2099' });
@@ -1582,7 +1582,7 @@ describe('a seal made with a key that is not the issuer’s', () => {
     const r = ok();
     set(r, notTheirs());
     const out = summarise(r);
-    expect(out).toMatchObject({ severity: 'error', code: 'key_mismatch', headline: "We couldn't confirm who sealed this" });
+    expect(out).toMatchObject({ severity: 'error', code: 'key_mismatch', headline: "We couldn't confirm who signed this" });
     expect(`${out.headline} ${out.detail}`).not.toMatch(/tamper|changed|altered/i);
     expect(row(r, CHECK.signature)).toMatchObject({ severity: 'unchecked', value: 'not checked' });
   });
@@ -1592,7 +1592,7 @@ describe('a seal made with a key that is not the issuer’s', () => {
     set(r, notTheirs());
     expect(row(r, CHECK.registeredIssuer)).toMatchObject({
       severity: 'error',
-      value: "can't confirm — the digital seal isn't theirs",
+      value: "can't confirm — the digital signature isn't theirs",
     });
     expect(summarise(r).action).toBe('Ask the issuer for an official copy.');
     expect(issuerIdentity(r).sealHeld).toBe(false);

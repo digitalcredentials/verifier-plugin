@@ -662,7 +662,7 @@ const FATAL: Record<string, Omit<Outcome, 'code'>> = {
     // inside is exactly the thing we can't vouch for.
     headline: "We can't tell if this is genuine",
     detail:
-      "It's missing the issuer's digital seal — the part that proves it came from them and shows whether anyone has tampered with it.",
+      "It's missing the issuer's digital signature — the part that proves it came from them and shows whether anyone has tampered with it.",
     action: 'Ask the issuer for an official copy.',
   },
   invalid_signature: {
@@ -679,9 +679,9 @@ const FATAL: Record<string, Omit<Outcome, 'code'>> = {
     // stopped saying so in #59. What fails is the link between the seal and
     // the issuer — their key setup is wrong, or someone else sealed it. Either
     // way the name inside is unconfirmed, so the action doesn't use it.
-    headline: "We couldn't confirm who sealed this",
+    headline: "We couldn't confirm who signed this",
     detail:
-      "Its digital seal can't be tied to the issuer it names. The contents may be fine, but we can't confirm they came from them.",
+      "Its digital signature can't be tied to the issuer it names. The contents may be fine, but we can't confirm they came from them.",
     action: 'Ask the issuer for an official copy.',
   },
   // The two below mean we could not find out — not that anything is wrong.
@@ -749,7 +749,7 @@ const reassurance = (
 ): string => {
   if (!sealHeld(checks)) return '';
   return !hasStatusList(r) || notWithdrawn(checks)
-    ? " It hasn't been tampered with, and the issuer hasn't withdrawn it."
+    ? " It hasn't been tampered with, and the issuer hasn't deactivated it."
     : " It hasn't been tampered with.";
 };
 
@@ -852,9 +852,12 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
     return {
       severity: 'error',
       code: 'withdrawn',
-      headline: 'The issuer has withdrawn this',
-      detail: 'This is no longer a valid credential.',
-      action: `A new copy must be obtained from ${named ?? 'the issuer'}.`,
+      headline: 'The issuer has deactivated this copy',
+      // Withdrawal applies to this copy, which an issuer may deactivate just to
+      // replace it. We can't tell why, so neither reading is ruled out.
+      detail:
+        "This copy is no longer valid. That doesn't always mean the achievement was taken back; issuers sometimes deactivate a copy to replace it, for example to correct a detail.",
+      action: `Ask ${named ?? 'the issuer'} for a current copy.`,
     };
   }
 
@@ -863,8 +866,8 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
     return {
       severity: 'error',
       code: 'suspended',
-      headline: 'The issuer has suspended this',
-      detail: "It can't be relied on while it's suspended. This may be temporary.",
+      headline: 'The issuer has put this copy on hold',
+      detail: "This copy can't be relied on while it's on hold. This may be temporary.",
       action: `Ask ${named ?? 'the issuer'} about it.`,
     };
   }
@@ -976,7 +979,7 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
       return {
         severity: 'unchecked',
         code: 'withdrawal_unknown',
-        headline: "We couldn't check whether this was withdrawn",
+        headline: "We couldn't check whether this copy is still active",
         // The earner doesn't know there is a list, let alone who signs it, so
         // the detail says what we couldn't find out, not how we look. It says
         // "the issuer" rather than the name: the seal held here, so the name is
@@ -985,23 +988,23 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
         // "May not be", not "isn't": we know who signed the list, not whether
         // the issuer asked them to.
         detail:
-          "The withdrawal information we found may not be from the issuer, so we can't rely on it. That's a problem at their end, not with your credential.",
+          "The status information we found may not be from the issuer, so we can't rely on it. That's a problem at their end, not with your credential.",
         // Trying again changes nothing; the list has to be fixed at source.
         // The action is a sentence the earner can pass on as it is, so it
         // says what couldn't be checked.
-        action: `Let ${named ?? 'the issuer'} know we couldn't check whether this has been withdrawn.`,
+        action: `Let ${named ?? 'the issuer'} know we couldn't check whether this copy is still active.`,
       };
     }
     return {
       severity: 'unchecked',
       code: 'withdrawal_unknown',
-      headline: "We couldn't check whether this was withdrawn",
+      headline: "We couldn't check whether this copy is still active",
       // Like the stranger's-list case above: no "list", which the earner
       // doesn't know exists. Not "couldn't load" either: an expired list, or
       // one that loaded but didn't verify, lands here too.
       detail: revocationError
-        ? "We couldn't get reliable withdrawal information from the issuer, so we can't tell you either way. That's a problem at their end, not with your credential."
-        : "This credential says it can be withdrawn, but that check never ran, so we can't tell you either way. That's a problem at our end, not with your credential.",
+        ? "We couldn't get reliable status information from the issuer, so we can't tell you either way. That's a problem at their end, not with your credential."
+        : "This credential says the issuer can deactivate it, but that check never ran, so we can't tell you either way. That's a problem at our end, not with your credential.",
       action: 'Try again in a moment.',
     };
   }
@@ -1056,7 +1059,7 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
       severity: 'unchecked',
       code: 'issuer_unconfirmed',
       headline: "Genuine, but we can't confirm who issued it",
-      detail: `It hasn't been tampered with, and the issuer hasn't withdrawn it. ${says}`,
+      detail: `It hasn't been tampered with, and the issuer hasn't deactivated it. ${says}`,
     };
   }
 
@@ -1076,7 +1079,7 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
     severity: 'success',
     code: 'verified',
     headline: 'Verified',
-    detail: "It hasn't been tampered with, and the issuer hasn't withdrawn it.",
+    detail: "It hasn't been tampered with, and the issuer hasn't deactivated it.",
   };
 };
 
@@ -1150,10 +1153,10 @@ export const listChecks = (r: VerificationResponse, options: OutcomeOptions = {}
         : 'unchecked',
     value: !confirmed
       ? tampered
-        ? "can't confirm — the digital seal doesn't match"
+        ? "can't confirm — the digital signature doesn't match"
         : keyMismatch
-          ? "can't confirm — the digital seal isn't theirs"
-          : "can't confirm — we couldn't check the digital seal"
+          ? "can't confirm — the digital signature isn't theirs"
+          : "can't confirm — we couldn't check the digital signature"
       : issuer.source === 'registry'
         ? `${issuer.name} — a known issuer`
         : // Before the list's own account: a lookup an earlier failure
@@ -1177,27 +1180,27 @@ export const listChecks = (r: VerificationResponse, options: OutcomeOptions = {}
     // list that loaded and came back clean.
     rows.push({
       id: CHECK.status,
-      label: 'Withdrawal',
+      label: 'Status',
       severity: 'unchecked',
-      value: 'the issuer set up no way to withdraw this',
+      value: 'the issuer set up no way to deactivate this',
     });
   } else {
     const withdrawn = isWithdrawn(checks);
     const suspended = !withdrawn && isSuspended(checks);
     rows.push({
       id: CHECK.status,
-      label: 'Withdrawal',
+      label: 'Status',
       severity: withdrawn || suspended ? 'error' : notWithdrawn(checks) ? 'success' : 'unchecked',
       value: withdrawn
-        ? 'withdrawn by the issuer'
+        ? 'deactivated by the issuer'
         : suspended
-          ? 'suspended by the issuer'
+          ? 'put on hold by the issuer'
           : notWithdrawn(checks)
-            ? 'none by the issuer'
+            ? 'active'
             : listNotIssuers(checks)
               ? "couldn't check — the information we found may not be from the issuer"
               : withdrawalUnavailable(revocation)
-                ? "couldn't check — no reliable withdrawal information"
+                ? "couldn't check — no reliable status information"
                 : 'not checked',
     });
   }

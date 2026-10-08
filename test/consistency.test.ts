@@ -17,12 +17,16 @@ import type { VerificationResponse, CheckResult } from '../src/types.js';
  */
 const CLAIMS_UNCHANGED =
   /(?<!\b(?:if|whether) (?:this|it) is )\b(?:genuine|authentic)\b|n['’]t been (?:tampered|changed|altered|modified)|\bnot been (?:tampered|changed|altered|modified)|was(?:n['’]t| not) (?:tampered|changed|altered|modified)|\bun(?:tampered|altered|modified|changed)\b|\bintact\b|\bno tampering\b|\bnothing has changed/;
+// The earner reads "deactivated" now (8 October 2026), so that counts too.
+// Not "still active": "We couldn't check whether this copy is still active"
+// is the opposite of a claim.
 const CLAIMS_NOT_WITHDRAWN =
-  /n['’]t been (?:withdrawn|revoked|cancelled)|n['’]t (?:withdrawn|revoked|cancelled) it|\bnot been (?:withdrawn|revoked|cancelled)|\bstill valid\b/;
+  /n['’]t been (?:withdrawn|revoked|cancelled|deactivated)|n['’]t (?:withdrawn|revoked|cancelled|deactivated) it|\bnot been (?:withdrawn|revoked|cancelled|deactivated)|\bstill valid\b/;
 
 describe('the claim patterns themselves', () => {
   it.each([
     "It hasn't been tampered with, and the issuer hasn't withdrawn it.",
+    "It hasn't been tampered with, and the issuer hasn't deactivated it.",
     'It has not been tampered with.',
     'No tampering detected.',
     'It was not tampered with.',
@@ -43,17 +47,27 @@ describe('the claim patterns themselves', () => {
   // Every sentence the verdicts actually use that is *not* a reassurance.
   it.each([
     "We can't tell if this is genuine",
-    "It's missing the issuer's digital seal — the part that proves it came from them and shows whether anyone has tampered with it.",
+    "It's missing the issuer's digital signature — the part that proves it came from them and shows whether anyone has tampered with it.",
     'This credential has been tampered with',
     "Something in it was changed after it was issued. We can't tell what.",
     "We couldn't check it for tampering. That's a problem at our end, not with your credential.",
     'This is no longer a valid credential.',
+    "This copy is no longer valid. That doesn't always mean the achievement was taken back; issuers sometimes deactivate a copy to replace it, for example to correct a detail.",
+    "This copy can't be relied on while it's on hold. This may be temporary.",
+    "We couldn't check whether this copy is still active",
   ])('does not read "%s" as a claim', (text) => {
     expect(text.toLowerCase()).not.toMatch(CLAIMS_UNCHANGED);
     expect(text.toLowerCase()).not.toMatch(CLAIMS_NOT_WITHDRAWN);
   });
 
-  it.each(["the issuer hasn't withdrawn it", 'It has not been withdrawn.', "It hasn't been revoked.", "It's still valid."])(
+  it.each([
+    "the issuer hasn't withdrawn it",
+    "the issuer hasn't deactivated it",
+    'It has not been withdrawn.',
+    'It has not been deactivated.',
+    "It hasn't been revoked.",
+    "It's still valid.",
+  ])(
     'reads "%s" as claiming it is not withdrawn',
     (text) => expect(text.toLowerCase()).toMatch(CLAIMS_NOT_WITHDRAWN),
   );
@@ -622,7 +636,7 @@ describe('a credential that is both withdrawn and expired', () => {
     const out = summarise(r);
     expect(out.code).toBe('withdrawn');
     expect(out.severity).toBe('error');
-    expect(out.action).toContain('new copy');
+    expect(out.action).toContain('current copy');
   });
 });
 

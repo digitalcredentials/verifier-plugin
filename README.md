@@ -349,7 +349,7 @@ Open on the wording, and none of them are bugs:
   nobody needs, on the screen almost everybody sees.
 - **Should a warning also reassure?** "This credential is missing information
   it should have" is followed by "It hasn't been tampered with, and the issuer
-  hasn't withdrawn it." The breakdown already says both.
+  hasn't deactivated it." The breakdown already says both.
 - **Does "There's nothing for you to do" reassure, or dismiss?** It comes from
   Nate's remark that most of these are not errors the holder could resolve
   themselves. It is the point of that outcome and the least settled part of
