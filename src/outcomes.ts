@@ -996,8 +996,11 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
       severity: 'unchecked',
       code: 'withdrawal_unknown',
       headline: "We couldn't check whether this was withdrawn",
+      // Like the stranger's-list case above: no "list", which the earner
+      // doesn't know exists. Not "couldn't load" either: an expired list, or
+      // one that loaded but didn't verify, lands here too.
       detail: revocationError
-        ? "The issuer's withdrawal list didn't load. That's a problem with their setup, not with your credential."
+        ? "We couldn't get reliable withdrawal information from the issuer, so we can't tell you either way. That's a problem at their end, not with your credential."
         : "This credential says it can be withdrawn, but that check never ran, so we can't tell you either way. That's a problem at our end, not with your credential.",
       action: 'Try again in a moment.',
     };
@@ -1194,7 +1197,7 @@ export const listChecks = (r: VerificationResponse, options: OutcomeOptions = {}
             : listNotIssuers(checks)
               ? "couldn't check — the information we found may not be from the issuer"
               : withdrawalUnavailable(revocation)
-                ? "couldn't check — the issuer's list didn't load"
+                ? "couldn't check — no reliable withdrawal information"
                 : 'not checked',
     });
   }

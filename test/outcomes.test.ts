@@ -390,7 +390,7 @@ describe('a credential with no way to be withdrawn', () => {
     const withdrawal = rows.find((c) => c.id === CHECK.status);
     expect(withdrawal!.value).toContain('no way to withdraw');
     // Nothing failed. There was nothing to try.
-    expect(withdrawal!.value).not.toContain("didn't load");
+    expect(withdrawal!.value).not.toContain('reliable');
     expect(withdrawal!.severity).not.toBe('error');
   });
 
@@ -417,7 +417,7 @@ describe('a credential with no way to be withdrawn', () => {
     expect(summarise(noStatus()).severity).toBe('success');
   });
 
-  it('does show the row when there is a status list that failed', () => {
+  it('shows the row, and says why in plain words, when there is a status list that failed', () => {
     const r = noStatus();
     r.verifiableCredential = { ...withoutStatusList, credentialStatus: { type: 'BitstringStatusListEntry' } };
     set(
@@ -432,7 +432,15 @@ describe('a credential with no way to be withdrawn', () => {
     );
     const withdrawal = listChecks(r).find((c) => c.id === CHECK.status);
     expect(withdrawal?.severity).toBe('unchecked');
-    expect(withdrawal?.value).toContain("didn't load");
+    expect(withdrawal?.value).toBe("couldn't check — no reliable withdrawal information");
+    const out = summarise(r);
+    expect(out.code).toBe('withdrawal_unknown');
+    expect(out.detail).toBe(
+      "We couldn't get reliable withdrawal information from the issuer, so we can't tell you either way. That's a problem at their end, not with your credential.",
+    );
+    expect(out.action).toBe('Try again in a moment.');
+    // The earner doesn't know there is a list; that belongs in the Developer view.
+    expect(`${out.detail} ${out.action} ${withdrawal?.value}`).not.toMatch(/\blist(s|ed)?\b/i);
   });
 });
 
@@ -1021,7 +1029,8 @@ describe('a withdrawal check that never ran', () => {
     // stopping earlier. The log cannot tell them apart, so neither do we.
     const out = summarise(unrecognised());
     expect(out.detail).toContain('never ran');
-    expect(out.detail).not.toContain("didn't load");
+    // Not the list-failed wording: nothing was fetched.
+    expect(out.detail).not.toContain('reliable');
     expect(out.detail).not.toContain('recognise');
   });
 
