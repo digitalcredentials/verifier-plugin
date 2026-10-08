@@ -1,3 +1,6 @@
+// Types only: tells a React host's JSX about <verifier-credential>.
+import './jsx.js';
+
 export { VerifierCredential } from './verifier-credential.js';
 export { verify, DEFAULT_REGISTRIES, type Registry, type VerifyOptions } from './verify.js';
 export {
