@@ -209,7 +209,7 @@ than an edge case we tidy up later.
 fetches withdrawal lists without the extra headers that set off the browser's
 preflight check, so a page reads them from GitHub Pages correctly (confirmed in
 a browser on 1 October). The browser tests now prove it against a stand-in for
-another site. "We couldn't check whether this has been withdrawn" is no longer
+another site. "We couldn't check whether this copy is still active" is no longer
 the normal result: it now comes from a problem with a particular list (one that
 has moved, expired or doesn't verify), or a check that couldn't run. The
 paragraph above is the 21 September finding, kept as it was.
@@ -358,8 +358,8 @@ Some specific changes, all cheap:
   issuer has deactivated this copy", says that doesn't always mean the
   achievement was taken back, and asks for a current copy. A suspended one
   reads "The issuer has put this copy on hold", which says it may come back
-  without promising it. The Details row is "Status": *active*, *deactivated
-  by the issuer*, *put on hold by the issuer*. On trial; to revisit.
+  without promising it. The Details row is "Status": *not deactivated or
+  on hold*, *deactivated by the issuer*, *put on hold by the issuer*. On trial; to revisit.
 - **"Tampered with," not "changed since it was issued,"** and not "has a
   valid signature." The team found tampering clearer (30 September 2026), so
   the verdict and the Details row now use the same word: the Tampering row
@@ -370,13 +370,13 @@ Some specific changes, all cheap:
   subject rather than a claim, like every other row. Going out to people for
   feedback in this form.
 - **"The issuer hasn't deactivated it,"** rather than "has not been revoked,"
-  for the same reason.
+  for the reason in the "this copy" item above.
 - **"Digital signature," explained where it appears.** An average learner
   doesn't know what a signature is *for*, so "this credential has no
   signature" told them nothing. The fix was the explanation, not the word: a
-  credential without one reads "We can't tell if this is genuine — it's
+  credential without one reads "We can't tell if this is genuine", then "It's
   missing the issuer's digital signature — the part that proves it came from
-  them and shows whether anyone has tampered with it", and asks for an
+  them and shows whether anyone has tampered with it.", and asks for an
   official copy. "Digital seal" was tried first; James found it less clear
   than "signed" (8 October 2026), which people know from signing documents
   online.

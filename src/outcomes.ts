@@ -1004,7 +1004,7 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
       // one that loaded but didn't verify, lands here too.
       detail: revocationError
         ? "We couldn't get reliable status information from the issuer, so we can't tell you either way. That's a problem at their end, not with your credential."
-        : "This credential says the issuer can deactivate it, but that check never ran, so we can't tell you either way. That's a problem at our end, not with your credential.",
+        : "This copy says the issuer can deactivate it or put it on hold, but that check never ran, so we can't tell you either way. That's a problem at our end, not with your credential.",
       action: 'Try again in a moment.',
     };
   }
@@ -1196,7 +1196,9 @@ export const listChecks = (r: VerificationResponse, options: OutcomeOptions = {}
         : suspended
           ? 'put on hold by the issuer'
           : notWithdrawn(checks)
-            ? 'active'
+            ? // Not just "active": under a Status label that would read as the
+              // credential's whole standing, beside "Expired" or "tampered".
+              'not deactivated or on hold'
             : listNotIssuers(checks)
               ? "couldn't check — the information we found may not be from the issuer"
               : withdrawalUnavailable(revocation)

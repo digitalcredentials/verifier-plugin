@@ -17,11 +17,12 @@ import type { VerificationResponse, CheckResult } from '../src/types.js';
  */
 const CLAIMS_UNCHANGED =
   /(?<!\b(?:if|whether) (?:this|it) is )\b(?:genuine|authentic)\b|n['’]t been (?:tampered|changed|altered|modified)|\bnot been (?:tampered|changed|altered|modified)|was(?:n['’]t| not) (?:tampered|changed|altered|modified)|\bun(?:tampered|altered|modified|changed)\b|\bintact\b|\bno tampering\b|\bnothing has changed/;
-// The earner reads "deactivated" now (8 October 2026), so that counts too.
-// Not "still active": "We couldn't check whether this copy is still active"
-// is the opposite of a claim.
+// The earner reads "deactivated" now (8 October 2026), so that counts too,
+// however the object is put ("it", "this copy"). "Still active" counts
+// unless it is asked about: "We couldn't check whether this copy is still
+// active" is the opposite of a claim, as with "genuine" above.
 const CLAIMS_NOT_WITHDRAWN =
-  /n['’]t been (?:withdrawn|revoked|cancelled|deactivated)|n['’]t (?:withdrawn|revoked|cancelled|deactivated) it|\bnot been (?:withdrawn|revoked|cancelled|deactivated)|\bstill valid\b/;
+  /n['’]t (?:been )?(?:withdrawn|revoked|cancelled|deactivated)\b|\bnot (?:been )?(?:withdrawn|revoked|cancelled|deactivated)\b|\bstill valid\b|(?<!whether (?:this|it|this copy) is )\bstill active\b/;
 
 describe('the claim patterns themselves', () => {
   it.each([
@@ -63,6 +64,10 @@ describe('the claim patterns themselves', () => {
   it.each([
     "the issuer hasn't withdrawn it",
     "the issuer hasn't deactivated it",
+    "the issuer hasn't deactivated this copy",
+    "It isn't deactivated.",
+    'The issuer has not deactivated it.',
+    'This copy is still active.',
     'It has not been withdrawn.',
     'It has not been deactivated.',
     "It hasn't been revoked.",

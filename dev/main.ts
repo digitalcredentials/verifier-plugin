@@ -39,16 +39,16 @@ interface Situation {
  */
 const SITUATIONS: Situation[] = [
   { label: 'Verified', file: 'verified', registries: LOCAL_REGISTRY, note: 'issuer in the registry, nothing wrong' },
-  { label: 'Not withdrawn', file: 'not-withdrawn', registries: LOCAL_REGISTRY, note: 'withdrawal list checked and clear' },
+  { label: 'Not withdrawn', file: 'not-withdrawn', registries: LOCAL_REGISTRY, note: 'status list checked: not deactivated or on hold' },
   { label: 'Issuer unknown', file: 'verified', registries: UNLISTED_REGISTRY, note: 'genuine, but no registry lists the issuer' },
   { label: 'Registry offline', file: 'verified', registries: OFFLINE_REGISTRY, note: "we couldn't reach the registry" },
   { label: 'Expired', file: 'expired', registries: LOCAL_REGISTRY, note: 'past its end date' },
   { label: 'Not yet valid', file: 'not-yet-valid', registries: LOCAL_REGISTRY, note: 'genuine, but its start date is still to come' },
-  { label: 'Withdrawn', file: 'withdrawn', registries: LOCAL_REGISTRY, note: 'the issuer withdrew it' },
-  { label: 'Suspended', file: 'suspended', registries: LOCAL_REGISTRY, note: 'the issuer set it aside, perhaps for now' },
+  { label: 'Withdrawn', file: 'withdrawn', registries: LOCAL_REGISTRY, note: 'the issuer deactivated this copy' },
+  { label: 'Suspended', file: 'suspended', registries: LOCAL_REGISTRY, note: 'the issuer put this copy on hold, perhaps for now' },
   { label: 'Built wrong', file: 'malformed', registries: LOCAL_REGISTRY, note: 'genuine, but missing a field its standard requires' },
   { label: 'Changed', file: 'tampered', registries: LOCAL_REGISTRY, note: 'altered after issuing' },
-  { label: 'Not their seal', file: 'not-their-seal', registries: LOCAL_REGISTRY, note: "names the issuer, sealed with someone else's key" },
+  { label: 'Not their seal', file: 'not-their-seal', registries: LOCAL_REGISTRY, note: "names the issuer, signed with someone else's key" },
   { label: 'Untrusted list', file: 'list-not-issuers', registries: LOCAL_REGISTRY, note: "its withdrawal list isn't signed by the issuer" },
   { label: 'No signature', file: 'unsigned', registries: LOCAL_REGISTRY, note: 'nothing to check' },
 ];

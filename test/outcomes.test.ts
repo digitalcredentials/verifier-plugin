@@ -399,7 +399,7 @@ describe('a credential with no way to be withdrawn', () => {
     // being a plain yes or no. Labels name the subject; values carry findings.
     for (const rows of [listChecks(noStatus()), listChecks(ok())]) {
       for (const row of rows) {
-        expect(row.label.toLowerCase()).not.toContain('withdrawn');
+        expect(row.label.toLowerCase()).not.toMatch(/withdrawn|deactivated|on hold/);
         expect(row.label.toLowerCase()).not.toContain('not changed');
       }
     }
@@ -1422,6 +1422,15 @@ const add = (r: VerificationResponse, c: CheckResult): void => {
 };
 
 const row = (r: VerificationResponse, id: string) => listChecks(r).find((c) => c.id === id);
+
+describe('the Status row when the list is clear', () => {
+  it('says only what the list showed, not that the credential is fine overall', () => {
+    // "active" alone, under a Status label, would read as the credential's
+    // whole standing, beside an "Expired" or "tampered" headline.
+    const r = ok();
+    expect(row(r, CHECK.status)).toMatchObject({ label: 'Status', severity: 'success', value: 'not deactivated or on hold' });
+  });
+});
 
 describe('a suspended credential', () => {
   it('is an error of its own, not "withdrawn", and says it may be temporary', () => {
