@@ -1004,7 +1004,7 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
       // one that loaded but didn't verify, lands here too.
       detail: revocationError
         ? "We couldn't get reliable status information from the issuer, so we can't tell you either way. That's a problem at their end, not with your credential."
-        : "This copy says the issuer can deactivate it or put it on hold, but that check never ran, so we can't tell you either way. That's a problem at our end, not with your credential.",
+        : "This copy says its status can be checked, but that check never ran, so we can't tell you either way. That's a problem at our end, not with your credential.",
       action: 'Try again in a moment.',
     };
   }

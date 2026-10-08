@@ -359,7 +359,8 @@ Some specific changes, all cheap:
   achievement was taken back, and asks for a current copy. A suspended one
   reads "The issuer has put this copy on hold", which says it may come back
   without promising it. The Details row is "Status": *not deactivated or
-  on hold*, *deactivated by the issuer*, *put on hold by the issuer*. On trial; to revisit.
+  on hold*, *deactivated by the issuer*, *put on hold by the issuer*. On
+  trial; to revisit.
 - **"Tampered with," not "changed since it was issued,"** and not "has a
   valid signature." The team found tampering clearer (30 September 2026), so
   the verdict and the Details row now use the same word: the Tampering row
