@@ -116,14 +116,14 @@ From the standup on 21 September 2026:
   credential may become one too.
 - **Verification library: `@digitalcredentials/verifier-core`.** On 22
   September the version was settled as whatever `verifier-plus` uses,
-  `^1.0.0-beta.7` (then `1.0.0-beta.11`). The next day work began on moving to
-  Nate's 2.x (#11, merged 28 September): checks grouped into suites by phase, dotted check ids,
-  presentation and per-credential results separated, and `skipped`-with-a-reason
-  and a per-check `fatal` flag as first-class, both of which had been
-  hand-built here.
+  `^1.0.0-beta.7` (then `1.0.0-beta.11`). The next day work began on moving
+  to Nate's 2.x (#11, merged 28 September): checks grouped into suites by
+  phase, dotted check ids, presentation and per-credential results
+  separated, and `skipped`-with-a-reason and a per-check `fatal` flag as
+  first-class, both of which had been hand-built here.
 
-  2.x is not on npm yet, so `package.json` pins a git commit:
-  a commit on digitalcredentials/verifier-core `main`, d217b04 (#22). It is bundled into
+  2.x is not on npm yet, so `package.json` pins a commit on
+  digitalcredentials/verifier-core `main`, d217b04 (#22). It is bundled into
   `dist/`, so a host app never installs it.
 - **veri-good is a reference, not a foundation.** It was an experiment, it
   targets a different setting (an issuer's own web page), and nobody uses it.
