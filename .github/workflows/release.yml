@@ -84,7 +84,8 @@ jobs:
           mkdir -p "$stage"
           cp -R dist LICENSE README.md "$stage/"
           # npm prepares a git dependency whose package.json has a build,
-          # prepare or install script by installing all its devDependencies:
+          # prepare, prepack or install-time script by installing all its
+          # devDependencies:
           # vite, Playwright, and verifier-core from git, whose own install
           # builds with pnpm. So the release package.json carries no
           # scripts and no devDependencies, and nothing runs on install. Not
