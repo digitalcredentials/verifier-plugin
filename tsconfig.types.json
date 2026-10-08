@@ -1,6 +1,8 @@
 {
   // Only the type test: src comes in through its imports, as it does for a
-  // host app, so the test fails if index.ts stops importing jsx.ts.
+  // host app, so the test fails if index.ts stops importing jsx.ts. Plus
+  // src/env.d.ts, which nothing imports: it types the one Vite variable
+  // verify.ts reads, and the published .d.ts files don't need it.
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "jsx": "react-jsx",
@@ -8,5 +10,5 @@
     "emitDeclarationOnly": false,
     "rootDir": "."
   },
-  "include": ["test/types"]
+  "include": ["test/types", "src/env.d.ts"]
 }
