@@ -114,16 +114,17 @@ From the standup on 21 September 2026:
 - **It's a plugin.** The web wallet is meant to be thin, with functionality
   added around it. Sharing and QR codes are separate plugins; viewing a
   credential may become one too.
-- **Verification library: `@digitalcredentials/verifier-core`**, the published
-  one. *Which* version was settled on 22 September: whatever `verifier-plus`
-  uses. That is `^1.0.0-beta.7`, resolving to `1.0.0-beta.11`, which is what
-  this pins.
+- **Verification library: `@digitalcredentials/verifier-core`.** On 22
+  September the version was settled as whatever `verifier-plus` uses,
+  `^1.0.0-beta.7` (then `1.0.0-beta.11`). The next day work began on moving to
+  Nate's 2.x (#11, merged 28 September): checks grouped into suites by phase, dotted check ids,
+  presentation and per-credential results separated, and `skipped`-with-a-reason
+  and a per-check `fatal` flag as first-class, both of which had been
+  hand-built here.
 
-  Nate is building on a 2.x that is not published yet — checks grouped into
-  suites by phase, dotted check ids, presentation and per-credential results
-  separated. Worth knowing that it carries `skipped`-with-a-reason and a
-  per-check `fatal` flag as first-class, both of which are hand-built here. So
-  the mapping gets thinner when it lands, not thicker.
+  2.x is not on npm yet, so `package.json` pins a git commit:
+  a commit on digitalcredentials/verifier-core `main`, d217b04 (#22). It is bundled into
+  `dist/`, so a host app never installs it.
 - **veri-good is a reference, not a foundation.** It was an experiment, it
   targets a different setting (an issuer's own web page), and nobody uses it.
   Worth learning from, not worth inheriting.
