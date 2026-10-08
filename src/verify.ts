@@ -54,6 +54,37 @@ export interface VerifyOptions {
 }
 
 /**
+ * A plain fetcher for the dev server and the browser tests only.
+ *
+ * verifier-core's own fetcher refuses anything but `https:`, and never fetches
+ * localhost or a private address — every redirect included — so a credential
+ * cannot point a verifier at someone's intranet. Hosts keep that: this is not
+ * reachable from the library or the published demo site, whose builds replace
+ * `import.meta.env.DEV` with `false` and drop this along with it.
+ *
+ * But the dev page and the browser tests serve their registry, withdrawal list
+ * and schema from localhost, so under the dev server they need a fetcher that
+ * will go there. It is a bare `fetch(url)`, like the built-in one: no headers,
+ * so no CORS preflight, which is what lets a withdrawal list on another site
+ * load at all (see below). It returns parsed JSON when the body is JSON and the
+ * text otherwise, as the built-in service does; it has none of its timeout,
+ * size cap or address checks, which is exactly why it stays out of builds.
+ */
+const devHttpGetService = {
+  get: async (url: string) => {
+    const response = await fetch(url);
+    const text = await response.text();
+    let body: unknown = text;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      // Not JSON: the text, as verifier-core's own fetcher hands it back.
+    }
+    return { body, headers: response.headers, status: response.status };
+  },
+};
+
+/**
  * The status-list gap is closed, and it closed upstream rather than here.
  *
  * 1.x built its document loader at module scope and `verifyCredential` took no
@@ -71,8 +102,9 @@ export interface VerifyOptions {
  *
  * Confirmed in a browser on 1 October 2026, against the real GitHub Pages: a
  * page on localhost found the published Withdrawn credential withdrawn and Not
- * withdrawn clear. The browser tests now cover it against a server that
- * refuses preflights the same way (test/browser/pages-like-server.js). And
+ * withdrawn clear. The browser tests covered it against a server that
+ * refuses preflights the same way (test/browser/pages-like-server.js) until
+ * they moved to the dev-only fetcher below, which is also a bare GET. And
  * the status list does go through the built-in service: patched to send a
  * custom header, it makes the withdrawal check fail with
  * STATUS_LIST_NOT_FOUND (tried by hand on 1 October, not a standing test).
@@ -84,10 +116,20 @@ export const verify = async (
   const registries = options.registries ?? DEFAULT_REGISTRIES;
   return (await verifyCredential({
     credential,
-    // Left out, not empty: an empty list is a lookup that found nothing,
-    // reported as "not registered", while no list at all is reported as a
-    // check that never ran (checked against 2.x on 3 October 2026).
+    // Left out when the host's list failed. On verifier-core's main (read off
+    // the library, 7 October 2026) an empty list and no list both skip the
+    // lookup ("No registries configured"), so
+    // this no longer changes what the library reports — it states the intent,
+    // and outcomes.ts reads the same flag to say the list didn't load.
     ...(options.registriesUnavailable ? {} : { registries: registries as never }),
+
+    // Dev server and browser tests only; see devHttpGetService. Note what that
+    // costs: the cross-site tests (pages-like-server.js, which refuses CORS
+    // preflights as GitHub Pages does) now exercise this fetcher, not the
+    // built-in one. Both send a bare GET with no custom headers, so neither
+    // triggers a preflight (read off the library, 7 October 2026) — but only a
+    // run against a published copy exercises the built-in one for real.
+    ...(import.meta.env.DEV ? { httpGetService: devHttpGetService } : {}),
 
     // 2.x defaults this to false, which drops every check that passed and
     // keeps only failures and skips. A passed check and a check that never ran

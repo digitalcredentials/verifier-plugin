@@ -17,12 +17,17 @@ import type { VerificationResponse, CheckResult } from '../src/types.js';
  */
 const CLAIMS_UNCHANGED =
   /(?<!\b(?:if|whether) (?:this|it) is )\b(?:genuine|authentic)\b|n['’]t been (?:tampered|changed|altered|modified)|\bnot been (?:tampered|changed|altered|modified)|was(?:n['’]t| not) (?:tampered|changed|altered|modified)|\bun(?:tampered|altered|modified|changed)\b|\bintact\b|\bno tampering\b|\bnothing has changed/;
+// The earner reads "deactivated" now (8 October 2026), so that counts too,
+// however the object is put ("it", "this copy"). "Still active" counts
+// unless it is asked about: "We couldn't check whether this copy is still
+// active" is the opposite of a claim, as with "genuine" above.
 const CLAIMS_NOT_WITHDRAWN =
-  /n['’]t been (?:withdrawn|revoked|cancelled)|n['’]t (?:withdrawn|revoked|cancelled) it|\bnot been (?:withdrawn|revoked|cancelled)|\bstill valid\b/;
+  /n['’]t (?:been )?(?:withdrawn|revoked|cancelled|deactivated)\b|\bnot (?:been )?(?:withdrawn|revoked|cancelled|deactivated)\b|\bstill valid\b|(?<!whether (?:this|it|this copy) is )\bstill active\b/;
 
 describe('the claim patterns themselves', () => {
   it.each([
     "It hasn't been tampered with, and the issuer hasn't withdrawn it.",
+    "It hasn't been tampered with, and the issuer hasn't deactivated it.",
     'It has not been tampered with.',
     'No tampering detected.',
     'It was not tampered with.',
@@ -43,17 +48,31 @@ describe('the claim patterns themselves', () => {
   // Every sentence the verdicts actually use that is *not* a reassurance.
   it.each([
     "We can't tell if this is genuine",
-    "It's missing the issuer's digital seal — the part that proves it came from them and shows whether anyone has tampered with it.",
+    "It's missing the issuer's digital signature — the part that proves it came from them and shows whether anyone has tampered with it.",
     'This credential has been tampered with',
     "Something in it was changed after it was issued. We can't tell what.",
     "We couldn't check it for tampering. That's a problem at our end, not with your credential.",
     'This is no longer a valid credential.',
+    "This copy is no longer valid. That doesn't always mean the achievement was taken back; issuers sometimes deactivate a copy to replace it, for example to correct a detail.",
+    "This copy can't be relied on while it's on hold. This may be temporary.",
+    "We couldn't check whether this copy is still active",
   ])('does not read "%s" as a claim', (text) => {
     expect(text.toLowerCase()).not.toMatch(CLAIMS_UNCHANGED);
     expect(text.toLowerCase()).not.toMatch(CLAIMS_NOT_WITHDRAWN);
   });
 
-  it.each(["the issuer hasn't withdrawn it", 'It has not been withdrawn.', "It hasn't been revoked.", "It's still valid."])(
+  it.each([
+    "the issuer hasn't withdrawn it",
+    "the issuer hasn't deactivated it",
+    "the issuer hasn't deactivated this copy",
+    "It isn't deactivated.",
+    'The issuer has not deactivated it.',
+    'This copy is still active.',
+    'It has not been withdrawn.',
+    'It has not been deactivated.',
+    "It hasn't been revoked.",
+    "It's still valid.",
+  ])(
     'reads "%s" as claiming it is not withdrawn',
     (text) => expect(text.toLowerCase()).toMatch(CLAIMS_NOT_WITHDRAWN),
   );
@@ -80,25 +99,60 @@ describe('the claim patterns themselves', () => {
  */
 
 /**
- * 2.x has no expiration check: expiry arrives as a *signature* failure
- * carrying the same problem type and title as tampering. So the signature
- * dimension now covers the ways that one check can fail, and the credential's
- * own end date is a dimension of its own — `summarise()` reads the date
- * rather than trusting the prose, and both have to agree with the rows.
+ * The validity dates are judged inside the signature check, so the signature
+ * dimension covers every way that one check can fail. Since verifier-core #58
+ * and #59 each has its own problem type: tampering, expiry, a start date not
+ * yet reached, and a key that isn't the issuer's. The end date stays a
+ * dimension of its own, because the headline names it and must not invent an
+ * expiry the library didn't report.
  */
-type Sig = 'passed' | 'tampered' | 'expired' | 'unattributable' | 'missing';
-/** `unreadable`: a status type the library does not recognise, so it skips. */
-type Rev = 'passed' | 'revoked' | 'list_error' | 'none' | 'unreadable';
+type Sig = 'passed' | 'tampered' | 'expired' | 'not_yet_valid' | 'key_mismatch' | 'unattributable' | 'missing';
+/**
+ * `unreadable`: a status type the library does not recognise, so it skips.
+ * `+other`: the list loaded and was read, but the issuer didn't sign it — the
+ * status check's own result is untouched, and a second check reports it.
+ * verifier-core's main reports that only for a list that passed; after a mark
+ * the second check is "Not run". `revoked+other` and `suspended+other` are
+ * here for when it does, so the rules are ready rather than merely untested.
+ */
+type Rev =
+  | 'passed'
+  | 'revoked'
+  | 'suspended'
+  | 'passed+other'
+  | 'revoked+other'
+  | 'suspended+other'
+  | 'list_error'
+  | 'none'
+  | 'unreadable'
+  | 'halted';
 type End = 'in_date' | 'past';
 /**
  * `errored` and `skipped` are the cases the 2.x migration got wrong: a lookup
  * that threw, or never ran, is not a confirmed "not in any registry".
  */
-type Iss = 'matched' | 'unlisted' | 'unreachable' | 'matched+unreachable' | 'errored' | 'skipped';
-type Sch = 'valid' | 'invalid' | 'no_schema' | 'unavailable' | 'missing';
+type Iss = 'matched' | 'unlisted' | 'unreachable' | 'matched+unreachable' | 'errored' | 'skipped' | 'halted';
+type Sch = 'valid' | 'invalid' | 'no_schema' | 'unavailable' | 'missing' | 'halted';
+/**
+ * `halted`: skipped because an earlier check failed fatally. verifier-core
+ * stops after a fatal failure, and the signature check is fatal for expiry
+ * too, so after it none of these run.
+ */
+const NOT_RUN = 'Not run: proof.signature failed';
 
-const SIGNATURES: Sig[] = ['passed', 'tampered', 'expired', 'unattributable', 'missing'];
-const REVOCATIONS: Rev[] = ['passed', 'revoked', 'list_error', 'none', 'unreadable'];
+const SIGNATURES: Sig[] = ['passed', 'tampered', 'expired', 'not_yet_valid', 'key_mismatch', 'unattributable', 'missing'];
+const REVOCATIONS: Rev[] = [
+  'passed',
+  'revoked',
+  'suspended',
+  'passed+other',
+  'revoked+other',
+  'suspended+other',
+  'list_error',
+  'none',
+  'unreadable',
+  'halted',
+];
 const ENDS: End[] = ['in_date', 'past'];
 const ISSUERS: Iss[] = [
   'matched',
@@ -107,8 +161,9 @@ const ISSUERS: Iss[] = [
   'matched+unreachable',
   'errored',
   'skipped',
+  'halted',
 ];
-const SCHEMAS: Sch[] = ['valid', 'invalid', 'no_schema', 'unavailable', 'missing'];
+const SCHEMAS: Sch[] = ['valid', 'invalid', 'no_schema', 'unavailable', 'missing', 'halted'];
 
 const check = (id: string, outcome: CheckResult['outcome'], fatal = false): CheckResult => ({
   id,
@@ -134,11 +189,7 @@ const signatureCheck = (sig: Sig): CheckResult | undefined => {
         {
           status: 'failure',
           problems: [
-            {
-              type: PROBLEM.invalidSignature,
-              title: 'Invalid Signature',
-              detail: 'Verification error(s).',
-            },
+            { type: PROBLEM.invalidSignature, title: 'Invalid Signature', detail: 'Invalid signature.' },
           ],
         },
         true,
@@ -150,10 +201,39 @@ const signatureCheck = (sig: Sig): CheckResult | undefined => {
           status: 'failure',
           problems: [
             {
-              type: PROBLEM.invalidSignature,
-              title: 'Invalid Signature',
-              // Same type and title as tampering. Only this sentence differs.
+              type: PROBLEM.credentialExpired,
+              title: 'Credential Expired',
               detail: `The current date time (2026-09-23T00:00:00Z) is after "validUntil" (${PAST}).`,
+            },
+          ],
+        },
+        true,
+      );
+    case 'not_yet_valid':
+      return check(
+        CHECK.signature,
+        {
+          status: 'failure',
+          problems: [
+            {
+              type: PROBLEM.credentialNotYetValid,
+              title: 'Credential Not Yet Valid',
+              detail: `The current date time (2026-09-23T00:00:00Z) is before "validFrom" (${FUTURE}).`,
+            },
+          ],
+        },
+        true,
+      );
+    case 'key_mismatch':
+      return check(
+        CHECK.signature,
+        {
+          status: 'failure',
+          problems: [
+            {
+              type: PROBLEM.verificationMethod,
+              title: 'Verification Method Error',
+              detail: 'The credential issuer did:key:z6Mkn does not control the verification method.',
             },
           ],
         },
@@ -179,6 +259,21 @@ const signatureCheck = (sig: Sig): CheckResult | undefined => {
 
 const revocationCheck = (rev: Rev): CheckResult | undefined => {
   switch (rev) {
+    case 'passed+other':
+      return revocationCheck('passed');
+    case 'revoked+other':
+      return revocationCheck('revoked');
+    case 'suspended+other':
+      return revocationCheck('suspended');
+    case 'halted':
+      return check(CHECK.status, { status: 'skipped', reason: NOT_RUN });
+    case 'suspended':
+      return check(CHECK.status, {
+        status: 'failure',
+        problems: [
+          { type: PROBLEM.suspended, title: 'Credential Suspended', detail: 'The credential has been suspended.' },
+        ],
+      });
     case 'none':
       return check(CHECK.status, {
         status: 'skipped',
@@ -200,7 +295,7 @@ const revocationCheck = (rev: Rev): CheckResult | undefined => {
         problems: [
           {
             type: PROBLEM.revoked,
-            title: 'Credential Revoked or Suspended',
+            title: 'Credential Revoked',
             detail: 'The credential has been revoked.',
           },
         ],
@@ -222,6 +317,8 @@ const revocationCheck = (rev: Rev): CheckResult | undefined => {
 const registryCheck = (iss: Iss): CheckResult | undefined => {
   const unchecked = '1 registries could not be checked: Second Registry';
   switch (iss) {
+    case 'halted':
+      return check(CHECK.registeredIssuer, { status: 'skipped', reason: NOT_RUN });
     case 'skipped':
       return check(CHECK.registeredIssuer, {
         status: 'skipped',
@@ -276,6 +373,8 @@ const registryCheck = (iss: Iss): CheckResult | undefined => {
 
 const schemaCheck = (sch: Sch): CheckResult | undefined => {
   switch (sch) {
+    case 'halted':
+      return check(CHECK.schema, { status: 'skipped', reason: NOT_RUN });
     case 'missing':
       return undefined;
     case 'valid':
@@ -316,6 +415,18 @@ const build = (sig: Sig, rev: Rev, end: End, iss: Iss, sch: Sch): VerificationRe
     check(CHECK.proofExists, { status: 'success', message: 'ok' }, true),
     signatureCheck(sig),
     revocationCheck(rev),
+    rev.endsWith('+other')
+      ? check(CHECK.statusListIssuer, {
+          status: 'failure',
+          problems: [
+            {
+              type: PROBLEM.statusListIssuerMismatch,
+              title: 'Status List Issuer Mismatch',
+              detail: 'The status list was issued by did:key:z6Mkother, not the credential issuer did:key:z6Mkn.',
+            },
+          ],
+        })
+      : undefined,
     registryCheck(iss),
     schemaCheck(sch),
   ].filter((c): c is CheckResult => c !== undefined);
@@ -325,6 +436,7 @@ const build = (sig: Sig, rev: Rev, end: End, iss: Iss, sch: Sch): VerificationRe
     verifiableCredential: {
       issuer: { id: 'did:key:z6Mkn', name: 'Springfield College' },
       validUntil: end === 'past' ? PAST : FUTURE,
+      validFrom: sig === 'not_yet_valid' ? FUTURE : '2025-01-09T10:00:00Z',
       // "none" means the issuer never set up a way to withdraw it at all.
       ...(rev === 'none' ? {} : { credentialStatus: { type: 'BitstringStatusListEntry' } }),
     },
@@ -339,11 +451,28 @@ const build = (sig: Sig, rev: Rev, end: End, iss: Iss, sch: Sch): VerificationRe
  */
 const HOST_LIST: ('loaded' | 'unavailable')[] = ['loaded', 'unavailable'];
 
+/**
+ * A check is only ever skipped as "not run" because one before it failed
+ * fatally: the signature for everything after it, the withdrawal check for
+ * the issuer lookup and the schema. A `halted` check with nothing failed
+ * ahead of it is a contradiction in the input, not a combination the rules
+ * owe an answer to, so it is left out — everything else, possible or not,
+ * stays in.
+ */
+const SIG_FATAL: Sig[] = ['tampered', 'expired', 'not_yet_valid', 'key_mismatch', 'unattributable'];
+const REV_FATAL: Rev[] = ['revoked', 'suspended', 'revoked+other', 'suspended+other', 'list_error'];
+const coherent = (sig: Sig, rev: Rev, iss: Iss, sch: Sch): boolean => {
+  const before = SIG_FATAL.includes(sig);
+  if (rev === 'halted' && !before) return false;
+  const beforeLater = before || REV_FATAL.includes(rev);
+  return (iss !== 'halted' && sch !== 'halted') || beforeLater;
+};
+
 const cases = SIGNATURES.flatMap((sig) =>
   REVOCATIONS.flatMap((rev) =>
     ENDS.flatMap((end) =>
       ISSUERS.flatMap((iss) =>
-        SCHEMAS.flatMap((sch) =>
+        SCHEMAS.filter((sch) => coherent(sig, rev, iss, sch)).flatMap((sch) =>
           HOST_LIST.map((list) => ({ sig, rev, end, iss, sch, list, name: `${sig}/${rev}/${end}/${iss}/${sch}/${list}` })),
         ),
       ),
@@ -447,9 +576,25 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
     if (CLAIMS_NOT_WITHDRAWN.test(claims)) {
       const revRow = row(CHECK.status)!;
       expect(
-        revRow.severity === 'success' || !hasStatusList(r),
-        `${where}: claims it was not withdrawn, but the row says "${revRow.value}"`,
+        revRow.severity === 'success',
+        `${where}: claims it was not deactivated, but the row says "${revRow.value}"`,
       ).toBe(true);
+    }
+
+    // A check that never ran says so, and gives no other reason: not "the
+    // list didn't load", not "couldn't load the standard". Severities can't
+    // see this — both read "unchecked". The one exception is the Issuer row
+    // when the seal failed, which talks about the seal instead (James, 1
+    // October 2026): that is the reason, and it outranks the lookup.
+    const haltedRows = [
+      rev === 'halted' && CHECK.status,
+      iss === 'halted' && CHECK.registeredIssuer,
+      sch === 'halted' && CHECK.schema,
+    ].filter((id): id is string => typeof id === 'string');
+    for (const id of haltedRows) {
+      const value = row(id)?.value ?? '';
+      const aboutTheSeal = id === CHECK.registeredIssuer && value.startsWith("can't confirm — ");
+      expect(aboutTheSeal || /(^|— )not checked$/.test(value), `${where}: "${row(id)?.label}" never ran, but reads "${value}"`).toBe(true);
     }
 
     // Each verdict must be borne out by the row it is about.
@@ -457,9 +602,14 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
       verified: [CHECK.signature, 'success'],
       invalid_signature: [CHECK.signature, 'error'],
       signature_unchecked: [CHECK.signature, 'unchecked'],
+      did_web_unresolved: [CHECK.signature, 'unchecked'],
+      http_error_with_signature_check: [CHECK.signature, 'unchecked'],
       withdrawn: [CHECK.status, 'error'],
+      suspended: [CHECK.status, 'error'],
       withdrawal_unknown: [CHECK.status, 'unchecked'],
       expired: [DATES_ROW, 'warning'],
+      not_yet_valid: [DATES_ROW, 'warning'],
+      key_mismatch: [CHECK.registeredIssuer, 'error'],
       malformed: [CHECK.schema, 'warning'],
     };
     const expected = expectations[out.code];
@@ -491,7 +641,7 @@ describe('a credential that is both withdrawn and expired', () => {
     const out = summarise(r);
     expect(out.code).toBe('withdrawn');
     expect(out.severity).toBe('error');
-    expect(out.action).toContain('new copy');
+    expect(out.action).toContain('current copy');
   });
 });
 
@@ -502,6 +652,7 @@ describe('verification that stopped early', () => {
     [CHECK.contextExists, 'Invalid JSON-LD', 'unreadable_vocabulary'],
     [CHECK.contextExists, 'Missing Context', 'invalid_jsonld'],
     [CHECK.vcContext, 'Not a Verifiable Credential', 'no_vc_context'],
+    [CHECK.vcStructure, 'Invalid Credential Structure', 'invalid_structure'],
     [CHECK.credentialId, 'Invalid Credential Id', 'invalid_credential_id'],
     [CHECK.proofExists, 'No Proof', 'no_proof'],
   ];

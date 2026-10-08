@@ -15,8 +15,6 @@ import {
   CHECK,
   PROBLEM,
   STATUS_LIST_PROBLEM_PREFIX,
-  EXPIRED_MARKERS,
-  TAMPERED_MARKERS,
   REGISTRY_FOUND,
   REGISTRY_UNCHECKED,
   STRUCTURAL_CONTEXT_DETAILS,
@@ -122,20 +120,6 @@ const hasProblem = (check: CheckResult | undefined, type: string): boolean =>
   problemsOf(check).some((p) => p.type === type);
 
 /**
- * Whether any problem's prose contains one of a set of markers.
- *
- * Reading prose is a last resort and the call sites say why each one is
- * unavoidable. Kept to one helper so they are easy to find and delete.
- */
-const detailMatches = (
-  check: CheckResult | undefined,
-  markers: readonly string[],
-): boolean =>
-  problemsOf(check).some((p) =>
-    markers.some((m) => (p.detail ?? '').includes(m)),
-  );
-
-/**
  * Whether the credential offers a way to be withdrawn at all.
  *
  * If it doesn't, verifier-core produces no revocation step — not a failed one.
@@ -167,6 +151,10 @@ export const stoppedEarly = (r: VerificationResponse): boolean => {
     CHECK.envelope,
     CHECK.contextExists,
     CHECK.vcContext,
+    // Fatal since verifier-core's core suite grew a structure check. Missing
+    // here, a credential with an unreadable date halted every later check and
+    // read "a problem at our end, try again", which can never help.
+    CHECK.vcStructure,
     CHECK.credentialId,
     CHECK.proofExists,
   ].some((id) => checks.get(id)?.outcome.status === 'failure');
@@ -187,6 +175,21 @@ const passed = (check: CheckResult | undefined): boolean =>
 /** A check actively failed, as opposed to not having run. */
 const failed = (check: CheckResult | undefined): boolean =>
   check?.outcome.status === 'failure';
+
+/**
+ * Skipped because an earlier check failed fatally. verifier-core stops there
+ * since its "halt after a fatal failure" change, and the signature check is
+ * fatal for expiry and a start date still to come, as well as for tampering —
+ * so after any of those, the withdrawal list, the issuer lookup and the
+ * schema are never consulted. Each then reads "not checked", which is what
+ * happened, rather than the account of a failure that didn't.
+ *
+ * Read off the skip reason, "Not run: proof.signature failed": the library
+ * marks a halted check no other way. Getting it wrong costs only which of two
+ * "not checked" wordings a row uses.
+ */
+const halted = (check: CheckResult | undefined): boolean =>
+  check?.outcome.status === 'skipped' && check.outcome.reason.startsWith('Not run:');
 
 /**
  * Pull the "A, B" list out of one of the registry sentences.
@@ -264,16 +267,51 @@ const anyUnreachable = (check: CheckResult | undefined): boolean =>
     REGISTRY_UNCHECKED.test(check.outcome.message));
 
 /**
+ * Whether the withdrawal list is someone else's.
+ *
+ * verifier-core reports it from its own check, after the list has loaded and
+ * been read, and leaves the withdrawal check's own result as it was. See
+ * PROBLEM.statusListIssuerMismatch for why we repeat neither answer.
+ *
+ * Only half of it reaches us today. A clean pass from a stranger's list is
+ * reported, and reads "we couldn't check". A *mark* on one is not: the
+ * withdrawal check is fatal, so a mark ends the status suite before the signer
+ * is compared, and the list-issuer check arrives "Not run". A stranger's
+ * "withdrawn" therefore still reads as the issuer's, and nothing in the result
+ * can tell the two apart (verifier-core, raised 7 October 2026). The rules
+ * below already treat a reported mismatch on a mark correctly, so the fix
+ * lands here unchanged when upstream reports it.
+ */
+const listNotIssuers = (checks: Map<string, CheckResult>): boolean =>
+  hasProblem(checks.get(CHECK.statusListIssuer), PROBLEM.statusListIssuerMismatch);
+
+/**
  * The issuer has actually withdrawn this.
  *
  * Deliberately narrower than "the withdrawal check failed". The check also
  * fails when the list would not load, had expired, or did not verify, and none
  * of those establish anything about the credential. Reporting one of them as a
  * withdrawal would be the gravest false claim this component could make, and
- * in 1.x only the absence of any distinction kept us from it.
+ * in 1.x only the absence of any distinction kept us from it. A list signed by
+ * someone other than the issuer establishes nothing either.
  */
-const isWithdrawn = (check: CheckResult | undefined): boolean =>
-  hasProblem(check, PROBLEM.revoked);
+const isWithdrawn = (checks: Map<string, CheckResult>): boolean =>
+  hasProblem(checks.get(CHECK.status), PROBLEM.revoked) && !listNotIssuers(checks);
+
+/**
+ * The issuer has suspended this: set aside, possibly for now. verifier-core
+ * has reported it apart from withdrawal since #40; before, both read
+ * "withdrawn". Withdrawal leads where a credential carries both.
+ */
+const isSuspended = (checks: Map<string, CheckResult>): boolean =>
+  hasProblem(checks.get(CHECK.status), PROBLEM.suspended) && !listNotIssuers(checks);
+
+/**
+ * The withdrawal list loaded, is the issuer's own, and doesn't list this. The
+ * only grounds for saying the issuer hasn't withdrawn it.
+ */
+const notWithdrawn = (checks: Map<string, CheckResult>): boolean =>
+  passed(checks.get(CHECK.status)) && !listNotIssuers(checks);
 
 /** The withdrawal check ran, failed, and established nothing either way. */
 const withdrawalUnavailable = (check: CheckResult | undefined): boolean =>
@@ -300,7 +338,8 @@ export type SchemaFinding =
   | { state: 'valid' }
   | { state: 'invalid'; missingOnly: boolean }
   | { state: 'no_schema' }
-  | { state: 'unavailable' };
+  | { state: 'unavailable' }
+  | { state: 'not_run' };
 
 /**
  * The schema check is a real check in 2.x, but it is neither fatal nor in the
@@ -316,6 +355,9 @@ export const schemaFinding = (r: VerificationResponse): SchemaFinding => {
   // there. If that ever regresses, "no standard was declared" is the honest
   // thing to say, and it is what the reader sees.
   if (!check) return { state: 'no_schema' };
+
+  // Nothing was tried, so nothing failed to load either.
+  if (halted(check)) return { state: 'not_run' };
 
   if (check.outcome.status === 'skipped') {
     // The two reasons the check actually emits. "Does not appear to be an OBv3
@@ -361,23 +403,35 @@ export const schemaFinding = (r: VerificationResponse): SchemaFinding => {
  * Whether the issuer's seal held: nothing in the credential changed since they
  * signed it. The one answer every row, reassurance and marker uses.
  *
- * More than `passed(signature)`, because 2.x has no expiration check: an
- * expired credential *fails* the signature check. But @digitalcredentials/vc
- * checks dates only after the proof has verified (`_verifyCredential` runs
- * `jsigs.verify` and returns on failure, then `_checkCredential`), so a failure
- * whose reason is the end date means the seal itself was fine. Read off the
- * library, 30 September 2026. Tampering is excluded by its own marker, so a
- * credential that was both altered and past its date is never called intact.
+ * More than `passed(signature)`, because the validity dates are judged inside
+ * the signature check: an expired credential, or one not valid yet, *fails*
+ * it. But @digitalcredentials/vc checks dates only after the proof has
+ * verified, so a failure whose only problems are about dates means the seal
+ * itself was fine. verifier-core has said so by type since #58; before, it was
+ * the same INVALID_SIGNATURE as tampering and we had to read its prose. Any
+ * other problem alongside a date — tampering, a key that isn't the issuer's —
+ * and the seal did not hold.
  */
+const DATE_PROBLEMS: readonly string[] = [PROBLEM.credentialExpired, PROBLEM.credentialNotYetValid];
 const sealHeld = (checks: Map<string, CheckResult>): boolean => {
   const signature = checks.get(CHECK.signature);
   if (passed(signature)) return true;
-  return (
-    failed(signature) &&
-    detailMatches(signature, EXPIRED_MARKERS) &&
-    !detailMatches(signature, TAMPERED_MARKERS)
-  );
+  const problems = problemsOf(signature);
+  return problems.length > 0 && problems.every((p) => DATE_PROBLEMS.includes(p.type));
 };
+
+/** The seal does not match the content: altered after issue. */
+const isTampered = (checks: Map<string, CheckResult>): boolean =>
+  hasProblem(checks.get(CHECK.signature), PROBLEM.invalidSignature);
+
+/**
+ * The seal was made with a key that isn't the issuer's, or that the issuer
+ * hasn't authorised. Not tampering: nothing says the content changed. But
+ * nothing ties it to the issuer it names, either. verifier-core reported this
+ * as INVALID_SIGNATURE, word for word what tampering said, until #59.
+ */
+const isKeyMismatch = (checks: Map<string, CheckResult>): boolean =>
+  !isTampered(checks) && hasProblem(checks.get(CHECK.signature), PROBLEM.verificationMethod);
 
 // ---------------------------------------------------------------------------
 // The issuer: a name, plus where the name came from
@@ -471,7 +525,10 @@ export const issuerMarker = (source: IssuerNameSource, sealHeld: boolean): strin
       // and the Issuer row says exactly that. The name above it has to agree.
       return sealHeld ? undefined : 'unconfirmed';
     case 'unknown':
-      return 'not checked';
+      // Without the seal the name is only the credential's own claim, which
+      // outweighs whether the list was checked: say that, as every other
+      // source does when the seal failed.
+      return sealHeld ? 'not checked' : 'unconfirmed';
     case 'unverifiable':
       // This used to be unmarked, on the grounds that the whole card carried
       // one caveat instead. That caveat was removed on 29 September 2026,
@@ -582,6 +639,13 @@ const FATAL: Record<string, Omit<Outcome, 'code'>> = {
     detail: "It's structured, but it doesn't say it's a verifiable credential.",
     action: 'Ask whoever sent it for the original file.',
   },
+  invalid_structure: {
+    severity: 'error',
+    headline: "We can't check this credential",
+    detail:
+      "It isn't put together the way credentials are required to be, so it couldn't be checked. That's a problem with how it was issued.",
+    action: 'Ask the issuer for a replacement.',
+  },
   invalid_credential_id: {
     severity: 'error',
     headline: "We can't check this credential",
@@ -598,7 +662,7 @@ const FATAL: Record<string, Omit<Outcome, 'code'>> = {
     // inside is exactly the thing we can't vouch for.
     headline: "We can't tell if this is genuine",
     detail:
-      "It's missing the issuer's digital seal — the part that proves it came from them and shows whether anyone has tampered with it.",
+      "It's missing the issuer's digital signature — the part that proves it came from them and shows whether anyone has tampered with it.",
     action: 'Ask the issuer for an official copy.',
   },
   invalid_signature: {
@@ -609,17 +673,28 @@ const FATAL: Record<string, Omit<Outcome, 'code'>> = {
     detail: "Something in it was changed after it was issued. We can't tell what.",
     action: 'Ask the issuer for a fresh copy.',
   },
+  key_mismatch: {
+    severity: 'error',
+    // Not "tampered": nothing says the content changed, and verifier-core
+    // stopped saying so in #59. What fails is the link between the seal and
+    // the issuer — their key setup is wrong, or someone else sealed it. Either
+    // way the name inside is unconfirmed, so the action doesn't use it.
+    headline: "We couldn't confirm who signed this",
+    detail:
+      "Its digital signature can't be tied to the issuer it names. The contents may be fine, but we can't confirm they came from them.",
+    action: 'Ask the issuer for an official copy.',
+  },
   // The two below mean we could not find out — not that anything is wrong.
   // Conflating them with invalid_signature is the worst mistake available.
   //
-  // Both are currently UNREACHABLE against verifier-core 2.x, which reports a
-  // transport failure and an unresolvable did:web as the same
-  // PROOF_VERIFICATION_ERROR as everything else the proof suite cannot
-  // complete. They fall to `signature_unchecked`, whose wording is the more
-  // general version of the same thing, so nothing false is shown — only
-  // something less specific. Kept, with their wording, for when upstream
-  // distinguishes them; we have no did:web fixture to exercise either path
-  // regardless.
+  // verifier-core's main has types for both (DID_WEB_UNRESOLVED,
+  // HTTP_ERROR), but in practice almost never uses them: its classifier
+  // recognises only an error named `HTTPError`, and its own fetcher and
+  // did:web resolver throw plain errors. So a did:web document that answers
+  // 404, or a host that doesn't answer at all, arrives as INVALID_SIGNATURE
+  // and reads as tampering (verified against the library, 7 October 2026). A
+  // false accusation against an honest credential, upstream's to fix; reading
+  // the sentence here would bring back the prose-matching this file shed.
   http_error_with_signature_check: {
     severity: 'unchecked',
     headline: "We couldn't finish checking this",
@@ -667,59 +742,48 @@ const UNCHECKED_SIGNATURE: Omit<Outcome, 'code'> = {
  * than anything unearned. `test/consistency.test.ts` asserts the claim
  * against the rows, in prose, because severities cannot see this: both
  * sides read "unchecked" and agree perfectly while the sentence lies.
+ *
+ * "The issuer hasn't deactivated it" only when it could have been and the
+ * check came back clear. For a credential the issuer set up no way to
+ * deactivate, saying so implied they could have (8 October 2026).
  */
 const reassurance = (
   r: VerificationResponse,
   checks: Map<string, CheckResult>,
 ): string => {
   if (!sealHeld(checks)) return '';
-  const notWithdrawn = !hasStatusList(r) || passed(checks.get(CHECK.status));
-  return notWithdrawn
-    ? " It hasn't been tampered with, and the issuer hasn't withdrawn it."
+  return hasStatusList(r) && notWithdrawn(checks)
+    ? " It hasn't been tampered with, and the issuer hasn't deactivated it."
     : " It hasn't been tampered with.";
 };
 
 /**
- * The credential's own end date, as a Date. Ours to read, and the reason we do
- * not have to take the library's prose on trust when deciding expiry.
- */
-const expiryOf = (r: VerificationResponse): Date | undefined => {
-  const raw = r.verifiableCredential?.['validUntil'] ?? r.verifiableCredential?.['expirationDate'];
-  if (typeof raw !== 'string') return undefined;
-  const date = new Date(raw);
-  return Number.isNaN(date.getTime()) ? undefined : date;
-};
-
-/** Past its end date, established from the credential rather than from prose. */
-const isPastEndDate = (r: VerificationResponse): boolean => {
-  const end = expiryOf(r);
-  return end !== undefined && end.getTime() < Date.now();
-};
-
-/**
- * Whether this credential has run out.
+ * Whether this credential has run out, or hasn't started yet.
  *
- * Defined once and read by both `summarise()` and `listChecks()`. Two copies
- * of this rule is exactly how a headline and a breakdown drift apart, and the
- * consistency suite caught them doing so the first time it ran against 2.x.
+ * Each defined once and read by both `summarise()` and `listChecks()`. Two
+ * copies of a rule is exactly how a headline and a breakdown drift apart, and
+ * the consistency suite caught them doing so the first time it ran against 2.x.
  *
- * The credential's own end date leads, because it is ours to check. The
- * library's prose is a second route for a date we could not parse.
+ * Both rest on the library's problem type alone. Until verifier-core #58 the
+ * two were reported as INVALID_SIGNATURE, like tampering, so we read the
+ * credential's own end date and the library's prose to tell them apart. Now
+ * the library judges the dates against its own clock and says which, and our
+ * clock second-guessing it could only produce a headline it disagrees with.
  */
-const isExpired = (r: VerificationResponse, checks: Map<string, CheckResult>): boolean => {
-  const signature = checks.get(CHECK.signature);
-  // The library said the date is why it stopped. That is an expiry we can
-  // report whatever else is true.
-  if (failed(signature) && detailMatches(signature, EXPIRED_MARKERS)) return true;
-  // Otherwise the end date is only worth asserting when the signature
-  // verified — an unverified `validUntil` is a number in a file nobody has
-  // vouched for, and "Expired on 9 January 2026" states it as fact. When the
-  // signature failed for some other reason we say we could not check instead.
-  return passed(signature) && isPastEndDate(r);
-};
+const isExpired = (checks: Map<string, CheckResult>): boolean =>
+  hasProblem(checks.get(CHECK.signature), PROBLEM.credentialExpired);
+const isNotYetValid = (checks: Map<string, CheckResult>): boolean =>
+  hasProblem(checks.get(CHECK.signature), PROBLEM.credentialNotYetValid);
 
-const expiryDate = (r: VerificationResponse): string | undefined => {
-  const raw = r.verifiableCredential?.['validUntil'] ?? r.verifiableCredential?.['expirationDate'];
+/** The end date, written out, or nothing if there isn't a readable one. */
+const expiryDate = (r: VerificationResponse): string | undefined =>
+  dateText(r.verifiableCredential?.['validUntil'] ?? r.verifiableCredential?.['expirationDate']);
+
+/** The start date, written out: `validFrom` in VC 2.0, `issuanceDate` in 1.1. */
+const startDate = (r: VerificationResponse): string | undefined =>
+  dateText(r.verifiableCredential?.['validFrom'] ?? r.verifiableCredential?.['issuanceDate']);
+
+const dateText = (raw: unknown): string | undefined => {
   if (typeof raw !== 'string') return undefined;
   const date = new Date(raw);
   if (Number.isNaN(date.getTime())) return undefined;
@@ -755,6 +819,8 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
     // unrecognised name leaking through into our catalogue was the risk then.
     const code = failed(checks.get(CHECK.vcContext))
       ? 'no_vc_context'
+      : failed(checks.get(CHECK.vcStructure))
+        ? 'invalid_structure'
       : failed(checks.get(CHECK.credentialId))
         ? 'invalid_credential_id'
         : failed(checks.get(CHECK.proofExists))
@@ -769,40 +835,55 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
   const revocation = checks.get(CHECK.status);
   const issuer = issuerIdentity(r, options);
 
-  // 2.x has no expiration check: an expired credential and one altered after
-  // issue both fail the *signature* check with the same problem type and the
-  // same title. Prose is the only thing the library offers to tell them apart,
-  // so expiry is established from the credential's own end date — which we
-  // hold — with the marker as a second route for a date we could not parse.
   // An action names the issuer only when the seal held. Otherwise the name is
   // the credential's own claim, which the Issuer row says we can't confirm,
   // and telling someone to go to that name would contradict it.
   const named = sealHeld(checks) ? issuer.name : undefined;
 
-  const signatureFailed = failed(signature);
-  const tampered = signatureFailed && detailMatches(signature, TAMPERED_MARKERS);
-  const expired = isExpired(r, checks);
-
   // Nothing below describes a credential that was altered, so this leads.
-  if (tampered) {
+  if (isTampered(checks)) {
     return { code: 'invalid_signature', ...FATAL['invalid_signature']! };
   }
 
+  // Next, a seal that can't be tied to the issuer. It leads over withdrawal
+  // and expiry for the same reason tampering does: with no seal of theirs,
+  // nothing below — a list, a date — is the issuer's to have said.
+  if (isKeyMismatch(checks)) {
+    return { code: 'key_mismatch', ...FATAL['key_mismatch']! };
+  }
 
-  if (isWithdrawn(revocation)) {
+  if (isWithdrawn(checks)) {
     return {
       severity: 'error',
       code: 'withdrawn',
-      headline: 'The issuer has withdrawn this',
-      detail: 'This is no longer a valid credential.',
-      action: `A new copy must be obtained from ${named ?? 'the issuer'}.`,
+      headline: 'The issuer has deactivated this copy',
+      // Withdrawal applies to this copy, which an issuer may deactivate just to
+      // replace it. We can't tell why, so neither reading is ruled out.
+      detail:
+        "This copy is no longer valid. That doesn't always mean the achievement was taken back; issuers sometimes deactivate a copy to replace it, for example to correct a detail.",
+      action: `Ask ${named ?? 'the issuer'} for a current copy.`,
+    };
+  }
+
+  // Below withdrawal, which is final. A suspension may not be.
+  if (isSuspended(checks)) {
+    return {
+      severity: 'error',
+      code: 'suspended',
+      headline: 'The issuer has put this copy on hold',
+      detail: "This copy can't be relied on while it's on hold. This may be temporary.",
+      action: `Ask ${named ?? 'the issuer'} about it.`,
     };
   }
 
   // Expiry sits below withdrawal deliberately. A credential that was withdrawn
   // *and* has since run out is withdrawn: the issuer has already decided, and
   // "ask whether it can be renewed" would bury that behind a lesser finding.
-  if (expired) {
+  // verifier-core's main can't currently tell us both: expiry is fatal, so the
+  // withdrawal list is never read and an expired credential reads "Expired"
+  // whether or not it was withdrawn. Its reassurance then makes no withdrawal
+  // claim. The order still stands for when both are reported.
+  if (isExpired(checks)) {
     // Name the date. How stale it is changes what someone does about it, and
     // "eight months ago" is vaguer than a date when a qualification is at
     // stake. §4's relative times are about when *we* checked, not this.
@@ -818,6 +899,20 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
       // otherwise: "Its dates have run out" only restated the headline.
       detail: reassurance(r, checks).trim(),
       action: `Ask ${named ?? 'the issuer'} whether it can be renewed.`,
+    };
+  }
+
+  // The mirror image of expiry, and worded like it: genuine, just not in
+  // force yet. A warning, not an error — nothing is wrong with it, and the
+  // date says when that changes.
+  if (isNotYetValid(checks)) {
+    const from = startDate(r);
+    return {
+      severity: 'warning',
+      code: 'not_yet_valid',
+      headline: from ? `Not valid until ${from}` : "This isn't valid yet",
+      detail: reassurance(r, checks).trim(),
+      action: from ? 'Check it again on or after that date.' : 'Check it again later.',
     };
   }
 
@@ -866,15 +961,54 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
   // `credentialStatus` type it does not recognise. Falling through put a
   // green "Verified" whose detail said the issuer had not withdrawn it above
   // a row saying we could not check.
+  //
+  // A list signed by someone other than the issuer lands here too, whatever it
+  // said: withdrawn, suspended or clear, it isn't the issuer's word.
+  //
+  // An unchecked seal outranks all of these: it is the more serious unknown,
+  // and verifier-core halts the withdrawal check after it, so "the withdrawal
+  // check never ran" would be true but beside the point.
+  if (!passed(signature) && !sealHeld(checks)) {
+    const code = hasProblem(signature, PROBLEM.didWebUnresolved)
+      ? 'did_web_unresolved'
+      : hasProblem(signature, PROBLEM.httpError)
+        ? 'http_error_with_signature_check'
+        : undefined;
+    return code ? { code, ...FATAL[code]! } : { code: 'signature_unchecked', ...UNCHECKED_SIGNATURE };
+  }
+
   const revocationError = withdrawalUnavailable(revocation);
-  if (hasStatusList(r) && !passed(revocation)) {
+  if (hasStatusList(r) && !notWithdrawn(checks)) {
+    if (listNotIssuers(checks)) {
+      return {
+        severity: 'unchecked',
+        code: 'withdrawal_unknown',
+        headline: "We couldn't check whether this copy is still active",
+        // The earner doesn't know there is a list, let alone who signs it, so
+        // the detail says what we couldn't find out, not how we look. It says
+        // "the issuer" rather than the name: the seal held here, so the name is
+        // always set, but for an issuer that gives none it is the bare
+        // identifier or "Unknown issuer", which reads badly mid-sentence.
+        // "May not be", not "isn't": we know who signed the list, not whether
+        // the issuer asked them to.
+        detail:
+          "The status information we found may not be from the issuer, so we can't rely on it. That's a problem at their end, not with your credential.",
+        // Trying again changes nothing; the list has to be fixed at source.
+        // The action is a sentence the earner can pass on as it is, so it
+        // says what couldn't be checked.
+        action: `Let ${named ?? 'the issuer'} know we couldn't check whether this copy is still active.`,
+      };
+    }
     return {
       severity: 'unchecked',
       code: 'withdrawal_unknown',
-      headline: "We couldn't check whether this was withdrawn",
+      headline: "We couldn't check whether this copy is still active",
+      // Like the stranger's-list case above: no "list", which the earner
+      // doesn't know exists. Not "couldn't load" either: an expired list, or
+      // one that loaded but didn't verify, lands here too.
       detail: revocationError
-        ? "The issuer's withdrawal list didn't load. That's a problem with their setup, not with your credential."
-        : "This credential says it can be withdrawn, but that check never ran, so we can't tell you either way. That's a problem at our end, not with your credential.",
+        ? "We couldn't get reliable status information from the issuer, so we can't tell you either way. That's a problem at their end, not with your credential."
+        : "This copy says its status can be checked, but that check never ran, so we can't tell you either way. That's a problem at our end, not with your credential.",
       action: 'Try again in a moment.',
     };
   }
@@ -929,7 +1063,7 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
       severity: 'unchecked',
       code: 'issuer_unconfirmed',
       headline: "Genuine, but we can't confirm who issued it",
-      detail: `It hasn't been tampered with, and the issuer hasn't withdrawn it. ${says}`,
+      detail: `${reassurance(r, checks).trim()} ${says}`,
     };
   }
 
@@ -949,7 +1083,7 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
     severity: 'success',
     code: 'verified',
     headline: 'Verified',
-    detail: "It hasn't been tampered with, and the issuer hasn't withdrawn it.",
+    detail: reassurance(r, checks).trim(),
   };
 };
 
@@ -970,7 +1104,8 @@ export const listChecks = (r: VerificationResponse, options: OutcomeOptions = {}
   // reader to flip between "yes is good" and "no is good" partway down the
   // list.
   const signature = checks.get(CHECK.signature);
-  const tampered = failed(signature) && detailMatches(signature, TAMPERED_MARKERS);
+  const tampered = isTampered(checks);
+  const keyMismatch = isKeyMismatch(checks);
   const confirmed = contentConfirmed(r);
   rows.push({
     id: CHECK.signature,
@@ -980,10 +1115,12 @@ export const listChecks = (r: VerificationResponse, options: OutcomeOptions = {}
     // someone who earned the credential. The label stays a subject rather
     // than a claim, as every other row does.
     label: 'Tampering',
-    // Only a signature failure we could attribute to tampering says so. An
-    // expired credential also fails this check — but only after its seal
-    // verified (see sealHeld), so it reads "none detected", not "not checked":
-    // we did check, and nothing had changed.
+    // Only a signature failure the library calls tampering says so. An
+    // expired or not-yet-valid credential also fails this check — but only
+    // after its seal verified (see sealHeld), so it reads "none detected", not
+    // "not checked": we did check, and nothing had changed. A key that isn't
+    // the issuer's reads "not checked" here: the seal could not be tested
+    // against the issuer at all, and the Issuer row says why.
     severity: sealHeld(checks) ? 'success' : tampered ? 'error' : 'unchecked',
     value: sealHeld(checks)
       ? 'none detected'
@@ -1009,15 +1146,29 @@ export const listChecks = (r: VerificationResponse, options: OutcomeOptions = {}
     // confirm, and why. And no row names a registry: "Local Dev Registry"
     // means nothing to an earner. The registry's own name stays in the
     // developer view, in the library's words.
-    severity: issuer.source === 'registry' && confirmed ? 'success' : 'unchecked',
+    //
+    // A seal made with someone else's key is the one case this row is an
+    // error: it is the finding the headline reports, and it is about who
+    // issued this, which is this row's subject.
+    severity: keyMismatch
+      ? 'error'
+      : issuer.source === 'registry' && confirmed
+        ? 'success'
+        : 'unchecked',
     value: !confirmed
       ? tampered
-        ? "can't confirm — the digital seal doesn't match"
-        : "can't confirm — we couldn't check the digital seal"
+        ? "can't confirm — the digital signature doesn't match"
+        : keyMismatch
+          ? "can't confirm — the digital signature isn't theirs"
+          : "can't confirm — we couldn't check the digital signature"
       : issuer.source === 'registry'
         ? `${issuer.name} — a known issuer`
-        : issuer.registriesUnreachable
-          ? `${issuer.name} — we couldn't load our list of known issuers`
+        : // Before the list's own account: a lookup an earlier failure
+          // stopped would not have run whether the list loaded or not.
+          halted(checks.get(CHECK.registeredIssuer))
+          ? `${issuer.name} — not checked`
+          : issuer.registriesUnreachable
+            ? `${issuer.name} — we couldn't load our list of known issuers`
           : issuer.source === 'unknown'
             ? `${issuer.name} — we couldn't finish checking our list of known issuers`
           : issuer.source === 'none'
@@ -1033,43 +1184,56 @@ export const listChecks = (r: VerificationResponse, options: OutcomeOptions = {}
     // list that loaded and came back clean.
     rows.push({
       id: CHECK.status,
-      label: 'Withdrawal',
+      label: 'Status',
       severity: 'unchecked',
-      value: 'the issuer set up no way to withdraw this',
+      value: 'the issuer set up no way to deactivate this',
     });
   } else {
+    const withdrawn = isWithdrawn(checks);
+    const suspended = !withdrawn && isSuspended(checks);
     rows.push({
       id: CHECK.status,
-      label: 'Withdrawal',
-      severity: isWithdrawn(revocation) ? 'error' : passed(revocation) ? 'success' : 'unchecked',
-      value: isWithdrawn(revocation)
-        ? 'withdrawn by the issuer'
-        : passed(revocation)
-          ? 'none by the issuer'
-          : withdrawalUnavailable(revocation)
-            ? "couldn't check — the issuer's list didn't load"
-            : 'not checked',
+      label: 'Status',
+      severity: withdrawn || suspended ? 'error' : notWithdrawn(checks) ? 'success' : 'unchecked',
+      value: withdrawn
+        ? 'deactivated by the issuer'
+        : suspended
+          ? 'put on hold by the issuer'
+          : notWithdrawn(checks)
+            ? // Not just "active": under a Status label that would read as the
+              // credential's whole standing, beside "Expired" or "tampered".
+              'not deactivated or on hold'
+            : listNotIssuers(checks)
+              ? "couldn't check — the information we found may not be from the issuer"
+              : withdrawalUnavailable(revocation)
+                ? "couldn't check — no reliable status information"
+                : 'not checked',
     });
   }
 
-  // 2.x has no expiration check. The validity period is enforced inside the
-  // signature check, so a passing signature means the dates held, and an
-  // expired credential shows up as that check failing with expiry in its
-  // prose. Reading the row off the same check as the verdict is also what
-  // keeps the two from disagreeing.
-  const expiredNow = isExpired(r, checks);
-  const expired = expiryDate(r);
+  // The validity period is judged inside the signature check, so a passing
+  // signature means the dates held, and a date outside them shows up as that
+  // check failing with its own problem type. Reading the row off the same
+  // check as the verdict is also what keeps the two from disagreeing.
+  const expiredNow = isExpired(checks);
+  const notYet = !expiredNow && isNotYetValid(checks);
+  const end = expiryDate(r);
+  const start = startDate(r);
   rows.push({
     id: CHECK.signature + '#dates',
     label: 'Dates',
-    severity: expiredNow ? 'warning' : passed(signature) ? 'success' : 'unchecked',
+    severity: expiredNow || notYet ? 'warning' : passed(signature) ? 'success' : 'unchecked',
     value: expiredNow
-      ? expired
-        ? `expired on ${expired}`
+      ? end
+        ? `expired on ${end}`
         : 'expired'
-      : passed(signature)
-        ? 'in date'
-        : 'not checked',
+      : notYet
+        ? start
+          ? `not valid until ${start}`
+          : 'not valid yet'
+        : passed(signature)
+          ? 'in date'
+          : 'not checked',
   });
 
   // Last, because it is the least about the credential's standing and the
@@ -1092,7 +1256,9 @@ export const listChecks = (r: VerificationResponse, options: OutcomeOptions = {}
             : "doesn't match the standard for this kind of credential"
           : schema.state === 'no_schema'
             ? 'no standard was declared to check it against'
-            : "couldn't load the standard to check it against",
+            : schema.state === 'not_run'
+              ? 'not checked'
+              : "couldn't load the standard to check it against",
   });
 
   return rows;
