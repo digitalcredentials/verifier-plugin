@@ -1032,6 +1032,11 @@ describe('a withdrawal check that never ran', () => {
     // Not the list-failed wording: nothing was fetched.
     expect(out.detail).not.toContain('reliable');
     expect(out.detail).not.toContain('recognise');
+    expect(out.detail).toBe(
+      "This copy says its status can be checked, but that check never ran, so we can't tell you either way. That's a problem at our end, not with your credential.",
+    );
+    // The earner doesn't know there is a list; that belongs in the Developer view.
+    expect(`${out.detail} ${out.action}`).not.toMatch(/\blist(s|ed)?\b/i);
   });
 
   it('reads the same way in the breakdown', () => {
