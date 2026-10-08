@@ -4,7 +4,7 @@
     "https://purl.imsglobal.org/spec/ob/v3p0/context-3.0.2.json",
     "https://w3id.org/security/suites/ed25519-2020/v1"
   ],
-  "id": "urn:uuid:6c2b8f19-4e73-42d1-8a5f-9b3e1d07c264",
+  "id": "urn:uuid:7d1f3a86-2b49-4c0e-9e57-8a6c2d4f1b30",
   "type": [
     "VerifiableCredential",
     "OpenBadgeCredential"
@@ -37,17 +37,17 @@
     }
   },
   "credentialStatus": {
-    "id": "https://digitalcredentials.github.io/verifier-plugin/fixtures/status-list.json#7",
+    "id": "https://digitalcredentials.github.io/verifier-plugin/fixtures/suspension-list.json#42",
     "type": "BitstringStatusListEntry",
-    "statusPurpose": "revocation",
-    "statusListIndex": "7",
-    "statusListCredential": "https://digitalcredentials.github.io/verifier-plugin/fixtures/status-list.json"
+    "statusPurpose": "suspension",
+    "statusListIndex": "42",
+    "statusListCredential": "https://digitalcredentials.github.io/verifier-plugin/fixtures/suspension-list.json"
   },
   "proof": {
     "type": "Ed25519Signature2020",
     "created": "2026-10-08T22:07:12Z",
     "verificationMethod": "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z#z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z",
     "proofPurpose": "assertionMethod",
-    "proofValue": "z52FEWSXxogMyAgovVKW9spuLPv7bTrYZALu3MppmqmSUBFf44vx4eKDKYXnAi91dMMkSogtqEawcoDf9bWZQSHhf"
+    "proofValue": "z4LPUJQedtkJnewtSpv42XRK8QNd5WMuG3GUm3x9M6h2fyK4TU7UmFckRUDw6o2gCr7V4Lqp3SUjJfWBwRf69Ntx"
   }
 }
