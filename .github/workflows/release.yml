@@ -85,12 +85,11 @@ jobs:
           cp -R dist LICENSE README.md "$stage/"
           # npm prepares a git dependency whose package.json has a build,
           # prepare, prepack or install-time script by installing all its
-          # devDependencies:
-          # vite, Playwright, and verifier-core from git, whose own install
-          # builds with pnpm. So the release package.json carries no
-          # scripts and no devDependencies, and nothing runs on install. Not
-          # `engines` either: dist is browser code, and Node 24 is only what
-          # building it needs.
+          # devDependencies: vite, Playwright, and verifier-core from git,
+          # whose own install builds with pnpm. So the release package.json
+          # carries no scripts and no devDependencies, and nothing runs on
+          # install. Not `engines` either: dist is browser code, and Node 24
+          # is only what building it needs.
           jq 'del(.scripts, .devDependencies, .engines)' package.json > "$stage/package.json"
           cd "$stage"
           git init -q -b release
