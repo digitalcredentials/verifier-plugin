@@ -100,6 +100,15 @@ const KNOWN_REGISTRIES = 'https://digitalcredentials.github.io/dcc-known-registr
 /** Long enough for any working server; a fetch that stalls rather than fails would otherwise leave the page blank. */
 const FETCH_TIMEOUT_MS = 10_000;
 
+/** The address as a URL, if it is one. (Not URL.canParse, which Safari only has from 17.) */
+const webAddress = (address: string): URL | undefined => {
+  try {
+    return new URL(address);
+  } catch {
+    return undefined;
+  }
+};
+
 /**
  * The credential address in a link: `?vc=<address>`, or `#verify?vc=<address>`
  * as VerifierPlus takes it, so a VerifierPlus link works here with its host
@@ -111,9 +120,11 @@ const FETCH_TIMEOUT_MS = 10_000;
  * but only when it isn't already a web address as it stands.
  */
 const linkedAddress = (): string | undefined => {
-  const query = location.hash.startsWith('#verify?') ? location.hash.slice('#verify'.length) : location.search;
-  const raw = /[?&]vc=(.*)$/s.exec(query)?.[1];
-  if (raw === undefined || URL.canParse(raw)) return raw;
+  const after = (part: string) => /[?&]vc=(.*)$/s.exec(part)?.[1];
+  const raw =
+    (location.hash.startsWith('#verify?') ? after(location.hash.slice('#verify'.length)) : undefined) ??
+    after(location.search);
+  if (raw === undefined || webAddress(raw)) return raw;
   try {
     return decodeURIComponent(raw);
   } catch {
@@ -149,23 +160,21 @@ const credentialIn = (data: unknown): { credential?: Record<string, unknown>; co
   return { credential: candidate, count: held.length };
 };
 
-type Fetched =
-  | { ok: true; credential: Record<string, unknown>; count: number }
-  | { ok: false; headline: string; before: string; shown: string; after: string };
-
 /**
- * Fetches the linked credential, or says why not. Every failure names what
- * was asked for, which is shown as text, never as HTML: it comes from
- * whoever made the link.
+ * Why a link can't be checked. `shown` is what the link asked for, which is
+ * shown as text, never as HTML: it comes from whoever made the link.
  */
-const fetchCredential = async (address: string): Promise<Fetched> => {
-  const url = URL.canParse(address) ? new URL(address) : undefined;
-  if (!url || !FETCHABLE.includes(url.protocol)) {
-    const asked = 'After “vc=” it should give the web address of a credential, starting https://.';
-    return address
-      ? { ok: false, headline: "That link doesn't say where the credential is", before: `${asked} It gives `, shown: address, after: '.' }
-      : { ok: false, headline: "That link doesn't say where the credential is", before: `${asked} It gives nothing.`, shown: '', after: '' };
-  }
+interface Problem {
+  headline: string;
+  before: string;
+  shown: string;
+  after: string;
+}
+
+type Fetched = { ok: true; credential: Record<string, unknown>; count: number } | ({ ok: false } & Problem);
+
+/** Fetches the linked credential, or says why not. */
+const fetchCredential = async (url: URL): Promise<Fetched> => {
   let response: Response;
   let text: string;
   try {
@@ -227,6 +236,16 @@ const knownRegistries = async (): Promise<Registry[] | undefined> => {
   }
 };
 
+/** Shows why a link can't be checked, in place of the card. */
+const showProblem = ({ headline, before, shown, after }: Problem) => {
+  const strong = document.createElement('strong');
+  strong.textContent = headline;
+  const code = document.createElement('code');
+  code.textContent = shown;
+  document.getElementById('problem')!.replaceChildren(strong, before, ...(shown ? [code] : []), after);
+  el.style.display = 'none';
+};
+
 /**
  * A credential from a link. The situation buttons go: they would swap the
  * linked credential for a test one.
@@ -234,23 +253,33 @@ const knownRegistries = async (): Promise<Registry[] | undefined> => {
 const openLink = async (address: string) => {
   bar.remove();
   document.getElementById('intro')!.textContent = 'The credential your link points to, checked in your browser.';
-  const [fetched, registries] = await Promise.all([fetchCredential(address), knownRegistries()]);
 
-  if (!fetched.ok) {
-    const problem = document.getElementById('problem')!;
-    const headline = document.createElement('strong');
-    headline.textContent = fetched.headline;
-    const shown = document.createElement('code');
-    shown.textContent = fetched.shown;
-    problem.replaceChildren(headline, fetched.before, ...(fetched.shown ? [shown] : []), fetched.after);
-    el.style.display = 'none';
+  // Turned down before anything is fetched, the registry list included.
+  const url = webAddress(address);
+  if (!url || !FETCHABLE.includes(url.protocol)) {
+    showProblem({
+      headline: "That link doesn't say where the credential is",
+      before: `After “vc=” it should give the web address of a credential, starting https://. It gives ${address ? '' : 'nothing.'}`,
+      shown: address,
+      after: address ? '.' : '',
+    });
     return;
   }
+
+  // Asked for alongside the credential, but only waited for once it is in:
+  // a credential that can't be had is said so without waiting on the list.
+  const registries = knownRegistries();
+  const fetched = await fetchCredential(url);
+  if (!fetched.ok) {
+    showProblem(fetched);
+    return;
+  }
+  const list = await registries;
 
   note.textContent =
     fetched.count > 1 ? `This link holds ${fetched.count} credentials. This is the first.` : '';
   // Set together, so the card checks once.
-  if (registries) el.registries = registries;
+  if (list) el.registries = list;
   else el.registriesUnavailable = true;
   el.credential = fetched.credential;
 };
@@ -272,5 +301,7 @@ if (address !== undefined) {
 }
 
 // The page reads its link once, on load. Editing the part after `#` doesn't
-// reload a page on its own, so it does it here.
-addEventListener('hashchange', () => location.reload());
+// reload a page on its own, so it does it here, when that changed the link.
+addEventListener('hashchange', () => {
+  if (linkedAddress() !== address) location.reload();
+});

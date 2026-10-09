@@ -79,8 +79,12 @@ test("the link can be VerifierPlus's, and its address encoded or not", async ({ 
     `./#verify?vc=${address}`,
     `./?vc=${encodeURIComponent(address)}`,
     `./#verify?vc=${encodeURIComponent(address)}`,
+    // A `#verify?` without a vc= of its own doesn't hide the query's.
+    `./?vc=${address}#verify?lang=en`,
   ]) {
     await open(page, path);
+    // Link mode, not the situations: their first one is a success too.
+    await expect(page.getByRole('group', { name: 'Situation' }), path).toHaveCount(0);
     expect((await card(page)).severity, path).toBe('success');
   }
 });
@@ -135,6 +139,17 @@ test("a link that can't be fetched says so, and shows no card", async ({ page })
   }
 });
 
+test("a credential that can't be fetched is said so without waiting on the registry list", async ({ page }) => {
+  // The list never answers; the page's own time limit is 10s, open()'s 30s.
+  await page.unroute(KNOWN_REGISTRIES);
+  await page.route(KNOWN_REGISTRIES, () => {});
+  await page.route(`${ELSEWHERE}/**`, (route) => route.fulfill({ status: 404, headers: CORS }));
+  const started = Date.now();
+  await open(page, `./?vc=${ELSEWHERE}/missing.json`);
+  expect(await problem(page)).toContain("We couldn't fetch that credential");
+  expect(Date.now() - started).toBeLessThan(8_000);
+});
+
 test("a link to something that isn't a credential says so", async ({ page }) => {
   const cases: [string, Parameters<Page['route']>[1]][] = [
     ['page', (route) => route.fulfill({ body: '<!doctype html><title>Hi</title>', contentType: 'text/html', headers: CORS })],
@@ -154,6 +169,10 @@ test("a link to something that isn't a credential says so", async ({ page }) => 
 });
 
 test('a link with no usable address says what it gave, as text, never as HTML', async ({ page }) => {
+  const lists: string[] = [];
+  page.on('request', (r) => {
+    if (r.url() === KNOWN_REGISTRIES) lists.push(r.url());
+  });
   await open(page, './?vc=<img src=x onerror="window.__xss=1">');
   const said = await problem(page);
   expect(said).toContain("That link doesn't say where the credential is");
@@ -166,6 +185,8 @@ test('a link with no usable address says what it gave, as text, never as HTML', 
 
   await open(page, './?vc=ftp://credentials.example/x.json');
   expect(await problem(page)).toContain("That link doesn't say where the credential is");
+  // Turned down before anything was fetched.
+  expect(lists).toEqual([]);
 });
 
 test('a build fetches only https addresses', async ({ page }) => {
@@ -204,4 +225,15 @@ test('changing the link after # opens the new one', async ({ page }) => {
   await page.waitForFunction(() => (window.__done ?? 0) > 0, null, { timeout: 30_000 });
   await expect(page.getByRole('group', { name: 'Situation' })).toHaveCount(0);
   expect((await card(page)).severity).toBe('success');
+});
+
+test("a change after # that isn't a link leaves the page as it is", async ({ page }) => {
+  await open(page, './');
+  const reloaded = page.waitForEvent('load', { timeout: 2_000 }).then(
+    () => true,
+    () => false,
+  );
+  await page.evaluate(() => (location.hash = '#elsewhere'));
+  expect(await reloaded).toBe(false);
+  await expect(page.getByRole('button', { name: 'Verified', exact: true })).toHaveCount(1);
 });
