@@ -66,6 +66,8 @@ const context = [
   'https://purl.imsglobal.org/spec/ob/v3p0/context-3.0.2.json',
 ];
 
+const SUBJECT_ID = 'did:example:sam-salmon';
+
 const baseCredential = (issuerDid, overrides = {}) => ({
   '@context': context,
   id: `urn:uuid:${overrides.uuid ?? '9d1a7f2c-59b1-4f0a-9d5e-3a6c1b8e40f2'}`,
@@ -78,6 +80,11 @@ const baseCredential = (issuerDid, overrides = {}) => ({
   },
   validFrom: '2026-03-12T10:00:00Z',
   credentialSubject: {
+    // Open Badges 3.0 requires an AchievementSubject to have an `id` or an
+    // `identifier`; without one verifier-core's recognition check fails, under
+    // a card that still reads Verified. did:example is the W3C specs' own
+    // placeholder method, so this can't be taken for a real learner's DID.
+    id: SUBJECT_ID,
     type: ['AchievementSubject'],
     name: 'Sam Salmon',
     achievement: {
@@ -208,6 +215,7 @@ const main = async () => {
         uuid: '8e5d2b71-0c46-4a93-b7e2-4f1a6c9d3058',
         credential: {
           credentialSubject: {
+            id: SUBJECT_ID,
             type: ['AchievementSubject'],
             name: 'Sam Salmon',
             achievement: {

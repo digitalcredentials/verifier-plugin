@@ -19,6 +19,7 @@
   },
   "validFrom": "2026-03-12T10:00:00Z",
   "credentialSubject": {
+    "id": "did:example:sam-salmon",
     "type": [
       "AchievementSubject"
     ],
@@ -38,9 +39,9 @@
   },
   "proof": {
     "type": "Ed25519Signature2020",
-    "created": "2026-10-07T13:55:04Z",
+    "created": "2026-10-09T17:00:12Z",
     "verificationMethod": "did:key:z6Mkfmm57fsb6VL7zVusP8zeA9SYkCKdvUhby2G7Yh8vvQ1P#z6Mkfmm57fsb6VL7zVusP8zeA9SYkCKdvUhby2G7Yh8vvQ1P",
     "proofPurpose": "assertionMethod",
-    "proofValue": "z5o2TzEfEVM6kFLpn4B4jfuo9SybqUfvew1xNmJVn6SMo8nzw75PMBKFWSjR2pzrZHPutoUn1BwCgbV9uC2vYbMmW"
+    "proofValue": "z2MZJWEJ4iUMBwJDioRDzekgQQTYBjMSoWqPHskKVkfsGzfktPsvbFqCxZ3mvEmYdc4BDWX6cY8CALho9ghciWhJS"
   }
 }
