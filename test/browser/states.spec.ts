@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
 import { CHECK, PROBLEM } from '../../src/types.js';
 import { card, preparePages, purl, settle } from './support.js';
@@ -614,6 +615,41 @@ test.describe('lifecycle, from review', () => {
     expect(after.count).toBe(1);
     expect(after.text).toContain('deactivated');
   });
+});
+
+/**
+ * A did:web issuer publishes its signing key in a did.json on its own website.
+ * When that won't load, verifier-core calls the signature invalid
+ * (verifier-core#65), and verify.ts's namingDidWebOutages turns it back into
+ * "couldn't reach". The credential is vc-test-fixtures' badDidWeb.json (see
+ * test/did-web-outages.test.ts). Its issuer's did.json is answered here, so
+ * nothing reaches the real site. Against a published copy, this exercises
+ * the built-in fetcher that builds use.
+ */
+test.describe("an issuer's website that won't serve its key", () => {
+  const UNREACHABLE: unknown = JSON.parse(
+    readFileSync(new URL('../fixtures/did-web-unreachable.json', import.meta.url), 'utf8'),
+  );
+  const DID_JSON = 'https://digitalcredentials.github.io/dcc-did-web-bad/did.json';
+
+  const cases: [string, Parameters<Page['route']>[1]][] = [
+    ['answers 404', (route) => route.fulfill({ status: 404, body: 'Not Found', headers: { 'access-control-allow-origin': '*' } })],
+    ["doesn't answer", (route) => route.abort('connectionrefused')],
+  ];
+  for (const [name, answer] of cases) {
+    test(`reads as unreachable, not tampered, when it ${name}`, async ({ page }) => {
+      await page.route(DID_JSON, answer);
+      await settle(page, async () => {
+        await page.evaluate((credential) => {
+          (document.getElementById('vc') as HTMLElement & { credential?: unknown }).credential = credential;
+        }, UNREACHABLE);
+      });
+      const c = await card(page);
+      expect(c.severity).toBe('unchecked');
+      expect(c.headline).toContain("We couldn't finish checking this");
+      expect(c.detail).toContain("we couldn't reach it");
+    });
+  }
 });
 
 /**

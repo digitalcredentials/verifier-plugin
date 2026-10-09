@@ -687,14 +687,15 @@ const FATAL: Record<string, Omit<Outcome, 'code'>> = {
   // The two below mean we could not find out — not that anything is wrong.
   // Conflating them with invalid_signature is the worst mistake available.
   //
-  // verifier-core's main has types for both (DID_WEB_UNRESOLVED,
-  // HTTP_ERROR), but in practice almost never uses them: its classifier
-  // recognises only an error named `HTTPError`, and its own fetcher and
-  // did:web resolver throw plain errors. So a did:web document that answers
-  // 404, or a host that doesn't answer at all, arrives as INVALID_SIGNATURE
-  // and reads as tampering (verified against the library, 7 October 2026). A
-  // false accusation against an honest credential, upstream's to fix; reading
-  // the sentence here would bring back the prose-matching this file shed.
+  // An issuer's did.json that won't load arrives as DID_WEB_UNRESOLVED and
+  // reads as did_web_unresolved — but only because verify.ts's
+  // namingDidWebOutages makes it so. Left alone, verifier-core almost never
+  // uses either type: its classifier recognises only an error named
+  // `HTTPError`, and its own fetcher and did:web resolver throw plain errors,
+  // so a did.json that answers 404, or a host that doesn't answer at all,
+  // arrives as INVALID_SIGNATURE and reads as tampering (verified against the
+  // library, 7 October 2026; verifier-core#65). Reading the sentence here
+  // instead would bring back the prose-matching this file shed.
   http_error_with_signature_check: {
     severity: 'unchecked',
     headline: "We couldn't finish checking this",

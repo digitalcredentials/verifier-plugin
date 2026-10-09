@@ -8,10 +8,11 @@
  * component, and correcting them is this file's real job — see `verbose`,
  * `recognizers` and `additionalSuites` below. Left alone, 2.x reports a
  * credential that violates its own standard as verified, and reports a check
- * that passed identically to one that never ran.
+ * that passed identically to one that never ran. A fourth correction is a
+ * stopgap for a library bug: see `namingDidWebOutages`.
  */
 
-import { verifyCredential } from '@digitalcredentials/verifier-core';
+import { BuiltinHttpGetService, verifyCredential } from '@digitalcredentials/verifier-core';
 import {
   obv3p0Recognizer,
   openBadgesSchemaSuite,
@@ -85,6 +86,80 @@ const devHttpGetService = {
 };
 
 /**
+ * verifier-core's HttpGetService, restated. Named from the library, it would
+ * put an import of verifier-core in the published types, and hosts never
+ * install verifier-core: it is bundled.
+ */
+interface HttpGetService {
+  get: (url: string) => Promise<{ body: unknown; headers: Headers; status: number }>;
+}
+
+/**
+ * The error verifier-core's signature check recognises as "a fetch failed":
+ * it goes by the name, and reads the address from `requestUrl`.
+ */
+class HTTPError extends Error {
+  override name = 'HTTPError';
+  constructor(
+    message: string,
+    readonly requestUrl: string,
+    options?: { cause?: unknown },
+  ) {
+    super(message, options);
+  }
+}
+
+/**
+ * Stopgap for verifier-core#65: an issuer website that is down reads as down,
+ * not as tampering.
+ *
+ * A did:web issuer publishes its signing key in a did.json on its own site.
+ * When that file won't load — the site doesn't answer, or answers 404 —
+ * verifier-core's did:web resolver throws a plain Error, and its signature
+ * check, which only knows a fetch failed if the error is named `HTTPError`,
+ * reports INVALID_SIGNATURE: what a tampered credential gets. outcomes.ts
+ * then tells an earner their honest credential was tampered with.
+ *
+ * This wraps the fetcher so a did.json that won't load fails with an
+ * `HTTPError` naming its address. The signature check then reports
+ * DID_WEB_UNRESOLVED, which outcomes.ts already words as "we couldn't reach"
+ * the issuer's website (verified against the library and vc-test-fixtures'
+ * badDidWeb.json, 8 October 2026). Delete this when verifier-core#65 is fixed.
+ *
+ * - "Won't load" includes the built-in fetcher refusing it: an issuer on a
+ *   private address, too many redirects, a body over 5 MB. We didn't reach
+ *   their key, which is true; telling refusals apart would mean reading the
+ *   fetcher's sentences, which outcomes.ts doesn't do. It used to say tampered.
+ * - The signature check only says DID_WEB_UNRESOLVED when the address
+ *   contains the issuer's did:web, so a key on another host, or an issuer
+ *   whose did:web has a port, reads as HTTP_ERROR instead: "something we
+ *   needed didn't load". Not tampered either.
+ * - Only addresses ending in /did.json, which is where did:web keeps a key;
+ *   status lists and registries don't, and get their statuses back as
+ *   before, to branch on themselves. A did.json that loads but is wrong is
+ *   left alone: that is not an outage.
+ */
+export const namingDidWebOutages = (inner: HttpGetService): HttpGetService => ({
+  get: async (url) => {
+    if (!url.endsWith('/did.json')) return inner.get(url);
+    const result = await inner.get(url).catch((error: unknown) => {
+      throw new HTTPError(`Could not fetch ${url}`, url, { cause: error });
+    });
+    if (result.status < 200 || result.status >= 300) {
+      throw new HTTPError(`Could not fetch ${url}: HTTP ${result.status}`, url);
+    }
+    return result;
+  },
+});
+
+/**
+ * One for the life of the page: verifier-core keeps a document loader, and
+ * its cache, per fetcher. The built-in fetcher is what verifier-core uses when
+ * given none, so builds lose nothing by being given this.
+ */
+const httpGetService = namingDidWebOutages(import.meta.env.DEV ? devHttpGetService : BuiltinHttpGetService());
+
+/**
  * The status-list gap is closed, and it closed upstream rather than here.
  *
  * 1.x built its document loader at module scope and `verifyCredential` took no
@@ -123,13 +198,15 @@ export const verify = async (
     // and outcomes.ts reads the same flag to say the list didn't load.
     ...(options.registriesUnavailable ? {} : { registries: registries as never }),
 
-    // Dev server and browser tests only; see devHttpGetService. Note what that
-    // costs: the cross-site tests (pages-like-server.js, which refuses CORS
-    // preflights as GitHub Pages does) now exercise this fetcher, not the
-    // built-in one. Both send a bare GET with no custom headers, so neither
-    // triggers a preflight (read off the library, 7 October 2026) — but only a
-    // run against a published copy exercises the built-in one for real.
-    ...(import.meta.env.DEV ? { httpGetService: devHttpGetService } : {}),
+    // The built-in fetcher in builds, the dev one under the dev server and in
+    // the browser tests (see devHttpGetService), each wrapped by
+    // namingDidWebOutages. Note what the dev one costs: the cross-site tests
+    // (pages-like-server.js, which refuses CORS preflights as GitHub Pages
+    // does) exercise it, not the built-in one. Both send a bare GET with no
+    // custom headers, so neither triggers a preflight (read off the library,
+    // 7 October 2026) — but only a run against a published copy exercises the
+    // built-in one for real.
+    httpGetService,
 
     // 2.x defaults this to false, which drops every check that passed and
     // keeps only failures and skips. A passed check and a check that never ran
