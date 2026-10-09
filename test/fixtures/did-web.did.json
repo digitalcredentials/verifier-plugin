@@ -1,0 +1,32 @@
+{
+    "@context": [
+        "https://www.w3.org/ns/did/v1",
+        "https://w3id.org/security/data-integrity/v1"
+    ],
+    "type": [
+        "Profile"
+    ],
+    "id": "did:web:digitalcredentials.github.io:vc-test-fixtures:dids:oidf",
+    "name": "DCC issuer-registry-client OIDF test DID",
+    "email": "DCC-support@mit.edu",
+    "image": "https://digitalcredentials.mit.edu/images/DCC_navbar-logo.png",
+    "url": "https://dcconsortium.org",
+    "description": "A DID that is registered in the DCC OIDF test registry, for testing the issuer-registry-client.",
+    "controller": "did:web:digitalcredentials.github.io:vc-test-fixtures:dids:oidf",
+    "assertionMethod": [
+        {
+            "id": "did:web:digitalcredentials.github.io:vc-test-fixtures:dids:oidf#z6MkjXe1vZvPRqFuc9nRBtZ3e1Y9XKDFSbjFAfzLfW2bD6cZ",
+            "type": "Multikey",
+            "controller": "did:web:digitalcredentials.github.io:vc-test-fixtures:dids:oidf",
+            "publicKeyMultibase": "z6MkjXe1vZvPRqFuc9nRBtZ3e1Y9XKDFSbjFAfzLfW2bD6cZ"
+        }
+    ],
+    "verificationMethod": [
+        {
+            "id": "did:web:digitalcredentials.github.io:vc-test-fixtures:dids:oidf#z6MkjXe1vZvPRqFuc9nRBtZ3e1Y9XKDFSbjFAfzLfW2bD6cZ",
+            "type": "Multikey",
+            "controller": "did:web:digitalcredentials.github.io:vc-test-fixtures:dids:oidf",
+            "publicKeyMultibase": "z6MkjXe1vZvPRqFuc9nRBtZ3e1Y9XKDFSbjFAfzLfW2bD6cZ"
+        }
+    ]
+}

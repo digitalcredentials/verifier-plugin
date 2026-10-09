@@ -247,6 +247,7 @@ A first slice: a real credential in, real verification, one card out.
 | `src/index.ts` | The public surface |
 | `src/jsx.ts` | Tells a React host's JSX about `<verifier-credential>`; types only |
 | `test/outcomes.test.ts` | The mapping, and the ways a good credential can be made to look bad |
+| `test/did-web-outages.test.ts` | An issuer's website that won't serve its key reads as unreachable, not tampered (stopgap for verifier-core#65) |
 | `test/consistency.test.ts` | 1,500 combinations asserting the headline and the breakdown can never disagree |
 | `test/browser/states.spec.ts` | Drives the component in a real browser, locally or against a published copy |
 | `test/browser/link.spec.ts` | The demo page opened from a link to a credential |
