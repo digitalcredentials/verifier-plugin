@@ -1,0 +1,26 @@
+{
+  "@context": [
+    "https://www.w3.org/ns/credentials/v2",
+    "https://w3id.org/security/suites/ed25519-2020/v1"
+  ],
+  "id": "https://digitalcredentials.github.io/verifier-plugin/pr-24/fixtures/status-list.json",
+  "type": [
+    "VerifiableCredential",
+    "BitstringStatusListCredential"
+  ],
+  "credentialSubject": {
+    "id": "https://digitalcredentials.github.io/verifier-plugin/pr-24/fixtures/status-list.json#list",
+    "type": "BitstringStatusList",
+    "encodedList": "uH4sIAAAAAAAAA-3BMQEAAAjAoEWxf0pt4QPUmQAAAAAAAAAAAAAAAAAAAIBHCzOa7TAAQAAA",
+    "statusPurpose": "revocation"
+  },
+  "issuer": "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z",
+  "validFrom": "2026-03-01T00:00:00Z",
+  "proof": {
+    "type": "Ed25519Signature2020",
+    "created": "2026-10-09T01:40:44Z",
+    "verificationMethod": "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z#z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z",
+    "proofPurpose": "assertionMethod",
+    "proofValue": "z4VZvZcyyo3zBH3sYoDbK86Sz5gukN8VQRkCJ8RFpfGxfiM5U3UZQU88UxytCDHgUBdXRmwogiEpXUDsVoaPD1ugc"
+  }
+}
