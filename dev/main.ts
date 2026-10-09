@@ -90,13 +90,218 @@ const load = async (situation: Situation) => {
   el.credential = credential;
 };
 
-for (const situation of SITUATIONS) {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.textContent = situation.label;
-  button.setAttribute('aria-pressed', 'false');
-  button.addEventListener('click', () => void load(situation));
-  bar.append(button);
+/**
+ * The list of known issuer registries DCC maintains, which the wallet checks
+ * against too. A linked credential is a real one, so it is checked against
+ * the real list, not the test registry the situations use.
+ */
+const KNOWN_REGISTRIES = 'https://digitalcredentials.github.io/dcc-known-registries/known-did-registries.json';
+
+/** Long enough for any working server; a fetch that stalls rather than fails would otherwise leave the page blank. */
+const FETCH_TIMEOUT_MS = 10_000;
+
+/** The address as a URL, if it is one. (Not URL.canParse, which Safari only has from 17.) */
+const webAddress = (address: string): URL | undefined => {
+  try {
+    return new URL(address);
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * The credential address in a link: `?vc=<address>`, or `#verify?vc=<address>`
+ * as VerifierPlus takes it, so a VerifierPlus link works here with its host
+ * swapped. Undefined when the page wasn't opened from a link.
+ *
+ * Everything after `vc=` is the address, because the wallet's share links
+ * put it there unencoded — `&` and `+` included — and a query-string parser
+ * would cut it short or turn `+` into a space. An encoded address is decoded,
+ * but only when it isn't already a web address as it stands.
+ */
+const linkedAddress = (): string | undefined => {
+  const after = (part: string) => /[?&]vc=(.*)$/s.exec(part)?.[1];
+  const raw =
+    (location.hash.startsWith('#verify?') ? after(location.hash.slice('#verify'.length)) : undefined) ??
+    after(location.search);
+  if (raw === undefined || webAddress(raw)) return raw;
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+};
+
+/**
+ * Only `https:` addresses in builds. The dev server also takes `http:`, so
+ * the browser tests can link to the fixtures it serves; builds replace
+ * `import.meta.env.DEV` with `false`.
+ */
+const FETCHABLE = import.meta.env.DEV ? ['https:', 'http:'] : ['https:'];
+
+/**
+ * The credential in what a link points to: the document itself, or the first
+ * credential in a presentation, which is how the wallet stores and shares
+ * one. Undefined when it isn't a credential. The wallet's own test
+ * (credentialFrom in lcw-front-end's src/lib/linkedin.ts), so whatever the
+ * wallet treats as a credential is checked here too, plus one case it
+ * doesn't take: a presentation holding its one credential as itself rather
+ * than in a list.
+ */
+const credentialIn = (data: unknown): { credential?: Record<string, unknown>; count: number } => {
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) return { count: 0 };
+  const held: unknown[] =
+    'verifiableCredential' in data ? [(data as { verifiableCredential: unknown }).verifiableCredential].flat() : [data];
+  const first = held[0];
+  if (typeof first !== 'object' || first === null) return { count: 0 };
+  const candidate = first as Record<string, unknown>;
+  const types = [candidate.type ?? []].flat();
+  if (!types.includes('VerifiableCredential') && !candidate.credentialSubject) return { count: 0 };
+  return { credential: candidate, count: held.length };
+};
+
+/**
+ * Why a link can't be checked. `shown` is what the link asked for, which is
+ * shown as text, never as HTML: it comes from whoever made the link.
+ */
+interface Problem {
+  headline: string;
+  before: string;
+  shown: string;
+  after: string;
 }
 
-void load(SITUATIONS[0]!);
+type Fetched = { ok: true; credential: Record<string, unknown>; count: number } | ({ ok: false } & Problem);
+
+/** Fetches the linked credential, or says why not. */
+const fetchCredential = async (url: URL): Promise<Fetched> => {
+  let response: Response;
+  let text: string;
+  try {
+    // No headers, so no CORS preflight, which GitHub Pages refuses. The
+    // body is read inside the time limit too: a server can stall after
+    // sending its headers.
+    response = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    text = await response.text();
+  } catch (error) {
+    write(`link       ${String(error)}`);
+    return {
+      ok: false,
+      headline: "We couldn't fetch that credential",
+      before: '',
+      shown: url.href,
+      // A browser can't tell these apart: it hides why a fetch across sites failed.
+      after: " didn't answer, or doesn't let other websites read it.",
+    };
+  }
+  if (!response.ok) {
+    return {
+      ok: false,
+      headline: "We couldn't fetch that credential",
+      before: '',
+      shown: url.href,
+      after: ` answered with an error (${response.status}).`,
+    };
+  }
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = undefined;
+  }
+  const { credential, count } = credentialIn(data);
+  if (!credential) {
+    return {
+      ok: false,
+      headline: "That link doesn't point to a credential",
+      before: '',
+      shown: url.href,
+      after: " sent something that isn't a credential.",
+    };
+  }
+  return { ok: true, credential, count };
+};
+
+/** The known registries, or undefined when they didn't load — which the card is told, rather than given none. */
+const knownRegistries = async (): Promise<Registry[] | undefined> => {
+  try {
+    const response = await fetch(KNOWN_REGISTRIES, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    if (!response.ok) throw new Error(`status ${response.status}`);
+    const list: unknown = await response.json();
+    if (!Array.isArray(list)) throw new Error('not a list');
+    return list as Registry[];
+  } catch (error) {
+    write(`registries ${String(error)}`);
+    return undefined;
+  }
+};
+
+/** Shows why a link can't be checked, in place of the card. */
+const showProblem = ({ headline, before, shown, after }: Problem) => {
+  const strong = document.createElement('strong');
+  strong.textContent = headline;
+  const code = document.createElement('code');
+  code.textContent = shown;
+  document.getElementById('problem')!.replaceChildren(strong, before, ...(shown ? [code] : []), after);
+  el.style.display = 'none';
+};
+
+/**
+ * A credential from a link. The situation buttons go: they would swap the
+ * linked credential for a test one.
+ */
+const openLink = async (address: string) => {
+  bar.remove();
+  document.getElementById('intro')!.textContent = 'The credential your link points to, checked in your browser.';
+
+  // Turned down before anything is fetched, the registry list included.
+  const url = webAddress(address);
+  if (!url || !FETCHABLE.includes(url.protocol)) {
+    showProblem({
+      headline: "That link doesn't say where the credential is",
+      before: `After “vc=” it should give the web address of a credential, starting https://. It gives ${address ? '' : 'nothing.'}`,
+      shown: address,
+      after: address ? '.' : '',
+    });
+    return;
+  }
+
+  // Asked for alongside the credential, but only waited for once it is in:
+  // a credential that can't be had is said so without waiting on the list.
+  const registries = knownRegistries();
+  const fetched = await fetchCredential(url);
+  if (!fetched.ok) {
+    showProblem(fetched);
+    return;
+  }
+  const list = await registries;
+
+  note.textContent =
+    fetched.count > 1 ? `This link holds ${fetched.count} credentials. This is the first.` : '';
+  // Set together, so the card checks once.
+  if (list) el.registries = list;
+  else el.registriesUnavailable = true;
+  el.credential = fetched.credential;
+};
+
+const address = linkedAddress();
+
+if (address !== undefined) {
+  void openLink(address);
+} else {
+  for (const situation of SITUATIONS) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = situation.label;
+    button.setAttribute('aria-pressed', 'false');
+    button.addEventListener('click', () => void load(situation));
+    bar.append(button);
+  }
+  void load(SITUATIONS[0]!);
+}
+
+// The page reads its link once, on load. Editing the part after `#` doesn't
+// reload a page on its own, so it does it here, when that changed the link.
+addEventListener('hashchange', () => {
+  if (linkedAddress() !== address) location.reload();
+});

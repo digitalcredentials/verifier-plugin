@@ -18,14 +18,21 @@
     #log { margin-top: 22px; font-family: ui-monospace, Menlo, monospace; font-size: .76rem;
            color: #47536a; white-space: pre-wrap; background: #fff; border: 1px solid #d9dee7;
            border-radius: 8px; padding: 12px; max-height: 220px; overflow: auto; }
+    .problem { margin: 0; }
+    .problem:not(:empty) { background: #fff; border: 1px solid #d9dee7; border-radius: 8px; padding: 14px 16px; }
+    .problem strong { display: block; margin-bottom: 4px; }
+    .problem code { overflow-wrap: anywhere; }
   </style>
 </head>
 <body>
   <div class="wrap">
     <h1>verifier-plugin</h1>
-    <p class="note">Real credentials, really signed, really verified. Pick a situation.</p>
+    <p class="note" id="intro">Real credentials, really signed, really verified. Pick a situation.</p>
     <div class="switch" id="switch" role="group" aria-label="Situation"></div>
     <p class="note" id="note"></p>
+    <!-- On the page from the start, empty: a status region that arrives
+         already holding its text may never be read out. -->
+    <p class="problem" id="problem" role="status"></p>
     <verifier-credential id="vc"></verifier-credential>
     <div id="log">waiting…</div>
   </div>

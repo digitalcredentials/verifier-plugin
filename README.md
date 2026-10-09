@@ -24,6 +24,21 @@ signed test credential in your browser. Every pull request also gets its own
 copy at `/verifier-plugin/pr-<number>/`, linked in a comment on the PR, so a
 change can be tried before it merges. It is taken down when the PR closes.
 
+**Check your own credential:** add `?vc=` and the credential's address to the
+demo's, or use VerifierPlus's `#verify?vc=` link with the host swapped:
+
+    https://digitalcredentials.github.io/verifier-plugin/?vc=https://raw.githubusercontent.com/digitalcredentials/vc-test-fixtures/main/verifiableCredentials/v2/ed25519/didKey/legacy-noStatus-noExpiry.json
+
+Everything after `vc=` is the address, encoded or not. It can be a credential
+or a presentation holding one, as the wallet shares it. The page checks the
+issuer against DCC's [known registries](https://digitalcredentials.github.io/dcc-known-registries/known-did-registries.json),
+the list the wallet uses, and hides the situation buttons. The address has to
+let other websites read it: `raw.githubusercontent.com` does, but GitHub's
+`github.com/…/raw/…` links redirect in a way browsers refuse. Four of the
+list's registries don't let other websites read them either, so they are
+never checked from a browser: both DCC Member ones (dcc-members-oidf#65) and
+both Credential Engine ones (checked 8 October 2026).
+
 Unit tests, browser tests, lint, typecheck and build run on every push. The
 browser tests run again against each published copy, because that is the one
 people look at.
@@ -234,6 +249,8 @@ A first slice: a real credential in, real verification, one card out.
 | `test/outcomes.test.ts` | The mapping, and the ways a good credential can be made to look bad |
 | `test/consistency.test.ts` | 1,500 combinations asserting the headline and the breakdown can never disagree |
 | `test/browser/states.spec.ts` | Drives the component in a real browser, locally or against a published copy |
+| `test/browser/link.spec.ts` | The demo page opened from a link to a credential |
+| `test/browser/support.ts` | Page setup both browser specs share |
 | `test/types/jsx.tsx` | Type test: a React host can write `<verifier-credential>` once it imports the package |
 | `scripts/make-fixtures.js` | Builds the test credentials, really signed |
 | `scripts/build-site.js` | Builds the demo page for a published address, with credentials signed for it |
