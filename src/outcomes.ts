@@ -639,6 +639,14 @@ const anyJsonLdError = (check: CheckResult | undefined): boolean =>
       !STRUCTURAL_CONTEXT_DETAILS.some((d) => (p.detail ?? '').includes(d)),
   );
 
+/**
+ * The reassurance under every "couldn't check": true whatever went wrong,
+ * since not knowing is never a finding against the credential. One copy, so
+ * the wording can't drift between verdicts; consistency.test.ts checks it is
+ * never read as a claim.
+ */
+const NOTHING_FOUND_WRONG = "That doesn't mean anything is wrong with your credential.";
+
 const FATAL: Record<string, Omit<Outcome, 'code'>> = {
   unreadable_vocabulary: {
     severity: 'error',
@@ -719,7 +727,7 @@ const FATAL: Record<string, Omit<Outcome, 'code'>> = {
   http_error_with_signature_check: {
     severity: 'unchecked',
     headline: "We couldn't finish checking this",
-    detail: "Something we needed didn't load. That doesn't mean anything is wrong with your credential.",
+    detail: `Something we needed didn't load. ${NOTHING_FOUND_WRONG}`,
     action: 'Try again in a moment.',
   },
   did_web_unresolved: {
@@ -748,7 +756,7 @@ const UNCHECKED_SIGNATURE: Omit<Outcome, 'code'> = {
   severity: 'unchecked',
   headline: "We couldn't finish checking this",
   detail:
-    "We couldn't check it for tampering. That doesn't mean anything is wrong with your credential.",
+    `We couldn't check it for tampering. ${NOTHING_FOUND_WRONG}`,
   action: 'Try again in a moment.',
 };
 
@@ -1031,7 +1039,7 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
       // one that loaded but didn't verify, lands here too.
       detail: revocationError
         ? "We couldn't get reliable status information from the issuer, so we can't tell you either way. That's a problem at their end, not with your credential."
-        : "This copy says its status can be checked, but we couldn't finish that check, so we can't tell you either way. That doesn't mean anything is wrong with your credential.",
+        : `This copy says its status can be checked, but we couldn't finish that check, so we can't tell you either way. ${NOTHING_FOUND_WRONG}`,
       action: 'Try again in a moment.',
     };
   }
@@ -1061,13 +1069,12 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
     // Part of the list not responding gets no "try again": a registry that
     // won't let a browser read it never will, and from here that looks the
     // same as one briefly down. The other two may well clear on a retry.
-    const reassure = "That doesn't mean anything is wrong with your credential.";
     if (issuer.registriesPartlyReached) {
       return {
         severity: 'unchecked',
         code: 'registry_unreachable',
         headline: "We couldn't confirm who issued this",
-        detail: `Some of our lists of known issuers didn't respond, so we don't know whether they're on them. ${reassure}`,
+        detail: `Some of our lists of known issuers didn't respond, so we don't know whether they're on them. ${NOTHING_FOUND_WRONG}`,
       };
     }
     const which = issuer.registriesUnreachable
@@ -1077,7 +1084,7 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
       severity: 'unchecked',
       code: 'registry_unreachable',
       headline: "We couldn't confirm who issued this",
-      detail: `${which} ${reassure}`,
+      detail: `${which} ${NOTHING_FOUND_WRONG}`,
       action: 'Try again in a moment.',
     };
   }

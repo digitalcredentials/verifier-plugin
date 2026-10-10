@@ -232,7 +232,7 @@ There are **four severity levels**, and that set doesn't grow:
 | **Success** | Everything checked out | Nothing |
 | **Warning** | Real, but with something worth knowing | Read it; maybe act |
 | **Error** | Don't rely on this | Contact the issuer |
-| **Couldn't check** | We weren't able to complete a check | Try again |
+| **Couldn't check** | We weren't able to complete a check | Try again, unless trying again can't help (see "Every problem says what to do") |
 
 Underneath, there is a **growing list of messages**, and each one maps to a
 severity. That list gets longer as we handle more cases. The severities don't.
@@ -587,7 +587,10 @@ Two things we now know, from testing on 21 September:
 - **The result tells us which registry failed, by name.** That name is for
   developers, so it appears in the developer view. The earner reads "Our list
   of known issuers didn't load", because a registry's name means nothing to
-  them (James, 1 October 2026).
+  them (James, 1 October 2026) — or, when some registries answered and
+  others didn't, "Some of our lists of known issuers didn't respond". In a
+  browser that second one is the common case: several registries on the real
+  list don't let a browser read them (10 October 2026).
 - **It is distinguishable from "not listed" only if you look for it.** See the
   requirement at the end of section 4. Get this wrong and the fourth case
   silently becomes the second one.
