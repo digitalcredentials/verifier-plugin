@@ -1431,7 +1431,7 @@ describe('when the host could not get its list of registries', () => {
       severity: 'unchecked',
       code: 'registry_unreachable',
       headline: "We couldn't confirm who issued this",
-      detail: "Some of our lists of known issuers didn't respond. That doesn't mean anything is wrong with your credential.",
+      detail: "Some of our lists of known issuers didn't respond, so we don't know whether they're on them. That doesn't mean anything is wrong with your credential.",
     });
     expect(issuerRow(partlyReached())).toBe("Springfield College — some of our lists of known issuers didn't respond");
     expect(issuerIdentity(partlyReached()).registriesPartlyReached).toBe(true);

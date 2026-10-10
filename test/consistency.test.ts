@@ -56,7 +56,7 @@ describe('the claim patterns themselves', () => {
     // saying the credential is unchanged or still active.
     "That doesn't mean anything is wrong with your credential.",
     'Something went wrong while checking it. That doesn’t mean anything is wrong with your credential.',
-    "Some of our lists of known issuers didn't respond. That doesn't mean anything is wrong with your credential.",
+    "Some of our lists of known issuers didn't respond, so we don't know whether they're on them. That doesn't mean anything is wrong with your credential.",
     "This copy says its status can be checked, but we couldn't finish that check, so we can't tell you either way. That doesn't mean anything is wrong with your credential.",
     'Try again later. If it keeps happening, let the issuer know.',
     'This is no longer a valid credential.',

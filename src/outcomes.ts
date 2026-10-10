@@ -1067,7 +1067,7 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
         severity: 'unchecked',
         code: 'registry_unreachable',
         headline: "We couldn't confirm who issued this",
-        detail: `Some of our lists of known issuers didn't respond. ${reassure}`,
+        detail: `Some of our lists of known issuers didn't respond, so we don't know whether they're on them. ${reassure}`,
       };
     }
     const which = issuer.registriesUnreachable

@@ -237,7 +237,7 @@ test("when part of the list doesn't respond, the card says so, with no try again
   const c = await card(page);
   expect(c.severity).toBe('unchecked');
   expect(c.headline).toContain("We couldn't confirm who issued this");
-  expect(c.detail).toBe("Some of our lists of known issuers didn't respond. That doesn't mean anything is wrong with your credential.");
+  expect(c.detail).toBe("Some of our lists of known issuers didn't respond, so we don't know whether they're on them. That doesn't mean anything is wrong with your credential.");
   expect(c.action).toBe('');
 });
 
