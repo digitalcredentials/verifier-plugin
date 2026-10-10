@@ -89,6 +89,14 @@ export interface IssuerIdentity {
    */
   registriesUnreachable: boolean;
   /**
+   * Some registries answered, none listing the issuer, while others went
+   * unchecked: the list loaded and part of it didn't respond. Read off the
+   * problem types, ISSUER_NOT_REGISTERED beside REGISTRY_UNCHECKED, not the
+   * prose (verified against the library, 10 October 2026). Every registry
+   * down gives REGISTRY_UNCHECKED alone.
+   */
+  registriesPartlyReached: boolean;
+  /**
    * Whether the issuer's seal held, so the credential is theirs. A registry
    * match without it names a known issuer, not this credential's.
    */
@@ -454,6 +462,7 @@ export const issuerIdentity = (r: VerificationResponse, options: OutcomeOptions 
   const registriesUnreachable =
     anyUnreachable(step) || (options.registriesUnavailable === true && !registryAnswered(step));
   const unreachable = registriesUnreachable ? unreachableNames(step) : [];
+  const registriesPartlyReached = registriesUnreachable && hasProblem(step, PROBLEM.issuerNotRegistered);
 
   const rawIssuer = (r.verifiableCredential?.['issuer'] ?? undefined) as
     | string
@@ -476,6 +485,7 @@ export const issuerIdentity = (r: VerificationResponse, options: OutcomeOptions 
       registries,
       unreachable,
       registriesUnreachable,
+      registriesPartlyReached,
       sealHeld: held,
       id,
     };
@@ -487,7 +497,16 @@ export const issuerIdentity = (r: VerificationResponse, options: OutcomeOptions 
       ? 'unknown'
       : 'credential';
   if (claimedName)
-    return { name: claimedName, source, registries, unreachable, registriesUnreachable, sealHeld: held, id };
+    return {
+      name: claimedName,
+      source,
+      registries,
+      unreachable,
+      registriesUnreachable,
+      registriesPartlyReached,
+      sealHeld: held,
+      id,
+    };
   // No name anywhere. `none` says so — but it must not swallow the fact that
   // a registry was unreachable, or the marker beside the name reads
   // "unconfirmed" while the verdict says we simply don't know.
@@ -501,6 +520,7 @@ export const issuerIdentity = (r: VerificationResponse, options: OutcomeOptions 
     registries,
     unreachable,
     registriesUnreachable,
+    registriesPartlyReached,
     sealHeld: held,
     id,
   };
@@ -619,6 +639,14 @@ const anyJsonLdError = (check: CheckResult | undefined): boolean =>
       !STRUCTURAL_CONTEXT_DETAILS.some((d) => (p.detail ?? '').includes(d)),
   );
 
+/**
+ * The reassurance under every "couldn't check": true whatever went wrong,
+ * since not knowing is never a finding against the credential. One copy, so
+ * the wording can't drift between verdicts; consistency.test.ts checks it is
+ * never read as a claim.
+ */
+const NOTHING_FOUND_WRONG = "That doesn't mean anything is wrong with your credential.";
+
 const FATAL: Record<string, Omit<Outcome, 'code'>> = {
   unreadable_vocabulary: {
     severity: 'error',
@@ -699,7 +727,7 @@ const FATAL: Record<string, Omit<Outcome, 'code'>> = {
   http_error_with_signature_check: {
     severity: 'unchecked',
     headline: "We couldn't finish checking this",
-    detail: "Something we needed didn't load. That's a problem at our end, not with your credential.",
+    detail: `Something we needed didn't load. ${NOTHING_FOUND_WRONG}`,
     action: 'Try again in a moment.',
   },
   did_web_unresolved: {
@@ -707,7 +735,9 @@ const FATAL: Record<string, Omit<Outcome, 'code'>> = {
     headline: "We couldn't finish checking this",
     detail:
       "The issuer publishes their details on their own website, and we couldn't reach it.",
-    action: 'Try again in a moment.',
+    // "Later", and who to tell: a site briefly down comes back, but a key
+    // file that's gone (404) won't, and only the issuer can put it back.
+    action: 'Try again later. If it keeps happening, let the issuer know.',
   },
   unknown_error: {
     severity: 'unchecked',
@@ -726,7 +756,7 @@ const UNCHECKED_SIGNATURE: Omit<Outcome, 'code'> = {
   severity: 'unchecked',
   headline: "We couldn't finish checking this",
   detail:
-    "We couldn't check it for tampering. That's a problem at our end, not with your credential.",
+    `We couldn't check it for tampering. ${NOTHING_FOUND_WRONG}`,
   action: 'Try again in a moment.',
 };
 
@@ -1009,7 +1039,7 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
       // one that loaded but didn't verify, lands here too.
       detail: revocationError
         ? "We couldn't get reliable status information from the issuer, so we can't tell you either way. That's a problem at their end, not with your credential."
-        : "This copy says its status can be checked, but that check never ran, so we can't tell you either way. That's a problem at our end, not with your credential.",
+        : `This copy says its status can be checked, but we couldn't finish that check, so we can't tell you either way. ${NOTHING_FOUND_WRONG}`,
       action: 'Try again in a moment.',
     };
   }
@@ -1035,14 +1065,26 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
     // No registry is named: the earner doesn't know what one is, and "our
     // list of known issuers" is what it is to them. Which registry failed is
     // in the developer view.
+    //
+    // Part of the list not responding gets no "try again": a registry that
+    // won't let a browser read it never will, and from here that looks the
+    // same as one briefly down. The other two may well clear on a retry.
+    if (issuer.registriesPartlyReached) {
+      return {
+        severity: 'unchecked',
+        code: 'registry_unreachable',
+        headline: "We couldn't confirm who issued this",
+        detail: `Some of our lists of known issuers didn't respond, so we don't know whether they're on them. ${NOTHING_FOUND_WRONG}`,
+      };
+    }
     const which = issuer.registriesUnreachable
-      ? "Our list of known issuers didn't load."
-      : "We couldn't finish checking our list of known issuers.";
+      ? "Our list of known issuers didn't load, so we don't know whether they're on it."
+      : "We couldn't finish checking our list of known issuers, so we don't know whether they're on it.";
     return {
       severity: 'unchecked',
       code: 'registry_unreachable',
       headline: "We couldn't confirm who issued this",
-      detail: `${which} That's a problem at our end, not with your credential. It doesn't mean they aren't on it — we just don't know.`,
+      detail: `${which} ${NOTHING_FOUND_WRONG}`,
       action: 'Try again in a moment.',
     };
   }
@@ -1160,7 +1202,7 @@ export const listChecks = (r: VerificationResponse, options: OutcomeOptions = {}
       ? tampered
         ? "can't confirm — the digital signature doesn't match"
         : keyMismatch
-          ? "can't confirm — the digital signature isn't theirs"
+          ? "can't confirm — the digital signature can't be tied to them"
           : "can't confirm — we couldn't check the digital signature"
       : issuer.source === 'registry'
         ? `${issuer.name} — a known issuer`
@@ -1168,6 +1210,8 @@ export const listChecks = (r: VerificationResponse, options: OutcomeOptions = {}
           // stopped would not have run whether the list loaded or not.
           halted(checks.get(CHECK.registeredIssuer))
           ? `${issuer.name} — not checked`
+          : issuer.registriesPartlyReached
+            ? `${issuer.name} — some of our lists of known issuers didn't respond`
           : issuer.registriesUnreachable
             ? `${issuer.name} — we couldn't load our list of known issuers`
           : issuer.source === 'unknown'

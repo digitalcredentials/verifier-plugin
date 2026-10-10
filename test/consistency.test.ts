@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { summarise, listChecks, stoppedEarly, hasStatusList } from '../src/outcomes.js';
+import { summarise, listChecks, stoppedEarly, hasStatusList, issuerIdentity } from '../src/outcomes.js';
 import { CHECK, PROBLEM, STATUS_LIST_PROBLEM_PREFIX } from '../src/types.js';
 import type { VerificationResponse, CheckResult } from '../src/types.js';
 
@@ -51,7 +51,14 @@ describe('the claim patterns themselves', () => {
     "It's missing the issuer's digital signature — the part that proves it came from them and shows whether anyone has tampered with it.",
     'This credential has been tampered with',
     "Something in it was changed after it was issued. We can't tell what.",
-    "We couldn't check it for tampering. That's a problem at our end, not with your credential.",
+    "We couldn't check it for tampering. That doesn't mean anything is wrong with your credential.",
+    // The reassurance under every "couldn't check": it must never be read as
+    // saying the credential is unchanged or still active.
+    "That doesn't mean anything is wrong with your credential.",
+    'Something went wrong while checking it. That doesn’t mean anything is wrong with your credential.',
+    "Some of our lists of known issuers didn't respond, so we don't know whether they're on them. That doesn't mean anything is wrong with your credential.",
+    "This copy says its status can be checked, but we couldn't finish that check, so we can't tell you either way. That doesn't mean anything is wrong with your credential.",
+    'Try again later. If it keeps happening, let the issuer know.',
     'This is no longer a valid credential.',
     "This copy is no longer valid. That doesn't always mean the achievement was taken back; issuers sometimes deactivate a copy to replace it, for example to correct a detail.",
     "This copy can't be relied on while it's on hold. This may be temporary.",
@@ -130,8 +137,19 @@ type End = 'in_date' | 'past';
 /**
  * `errored` and `skipped` are the cases the 2.x migration got wrong: a lookup
  * that threw, or never ran, is not a confirmed "not in any registry".
+ * `unreachable` is some registries answering, none listing the issuer, and
+ * others not; `none_reached` is every registry down. The library reports
+ * them differently (checked 10 October 2026), and so does the card.
  */
-type Iss = 'matched' | 'unlisted' | 'unreachable' | 'matched+unreachable' | 'errored' | 'skipped' | 'halted';
+type Iss =
+  | 'matched'
+  | 'unlisted'
+  | 'unreachable'
+  | 'none_reached'
+  | 'matched+unreachable'
+  | 'errored'
+  | 'skipped'
+  | 'halted';
 type Sch = 'valid' | 'invalid' | 'no_schema' | 'unavailable' | 'missing' | 'halted';
 /**
  * `halted`: skipped because an earlier check failed fatally. verifier-core
@@ -158,6 +176,7 @@ const ISSUERS: Iss[] = [
   'matched',
   'unlisted',
   'unreachable',
+  'none_reached',
   'matched+unreachable',
   'errored',
   'skipped',
@@ -357,6 +376,17 @@ const registryCheck = (iss: Iss): CheckResult | undefined => {
           { type: PROBLEM.registryUnchecked, title: 'Registry Unchecked', detail: unchecked },
         ],
       });
+    case 'none_reached':
+      return check(CHECK.registeredIssuer, {
+        status: 'failure',
+        problems: [
+          {
+            type: PROBLEM.registryUnchecked,
+            title: 'Registry Unchecked',
+            detail: `Issuer registration could not be determined: ${unchecked}`,
+          },
+        ],
+      });
     case 'errored':
       return check(CHECK.registeredIssuer, {
         status: 'failure',
@@ -554,15 +584,24 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
     // list too — not the seal. Both read "unchecked", so severities can't see
     // the two giving different reasons.
     if (out.code === 'registry_unreachable') {
-      expect(row(CHECK.registeredIssuer)?.value, `${where}: the verdict blames the list, the row doesn't`).toContain(
-        'list of known issuers',
+      // "Lists", plural, where part of it didn't respond.
+      expect(row(CHECK.registeredIssuer)?.value, `${where}: the verdict blames the list, the row doesn't`).toMatch(
+        /lists? of known issuers/,
       );
       // ...and for the same reason. "Didn't load" above "couldn't finish
       // checking" gives two accounts of one failure, and a host that says its
       // list was unavailable made that pairing reachable from a second route.
-      const loaded = /didn't load/.test(out.detail);
+      // The words follow the state, not the other way round.
+      expect(/didn't respond/.test(out.detail), `${where}: "didn't respond" without part of the list unreached`).toBe(
+        issuerIdentity(r, options).registriesPartlyReached,
+      );
+      const reason = /didn't respond/.test(out.detail)
+        ? "didn't respond"
+        : /didn't load/.test(out.detail)
+          ? "couldn't load our list"
+          : "couldn't finish checking";
       expect(row(CHECK.registeredIssuer)?.value, `${where}: the verdict and the row give different reasons`).toContain(
-        loaded ? "couldn't load our list" : "couldn't finish checking",
+        reason,
       );
     }
 
@@ -623,10 +662,12 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
       expect(row(CHECK.registeredIssuer)?.severity, `${where}: issuer row`).not.toBe('success');
     }
 
-    // Every verdict that is not a pass names one thing to do, except the
-    // unconfirmed-issuer case, where §5 deliberately gives no instruction
-    // because nothing is wrong and there is nothing to fix.
-    if (out.severity !== 'success' && out.code !== 'issuer_unconfirmed') {
+    // Every verdict that is not a pass names one thing to do, except where
+    // nothing is wrong and there is nothing to fix: the unconfirmed-issuer
+    // case (§5), and part of the list not responding, where a registry that
+    // blocks browsers would make "try again" a promise we can't keep.
+    const partlyReached = out.code === 'registry_unreachable' && issuerIdentity(r, options).registriesPartlyReached;
+    if (out.severity !== 'success' && out.code !== 'issuer_unconfirmed' && !partlyReached) {
       expect(out.action, `${where}: no action offered`).toBeTruthy();
     }
   });
