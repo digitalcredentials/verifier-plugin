@@ -1410,7 +1410,9 @@ describe('when the host could not get its list of registries', () => {
     expect(out.code).toBe('registry_unreachable');
     expect(out.severity).toBe('unchecked');
     expect(out.headline).toBe("We couldn't confirm who issued this");
-    expect(out.detail).toMatch(/^Our list of known issuers didn't load,/);
+    expect(out.detail).toBe(
+      "Our list of known issuers didn't load, so we don't know whether the issuer is on it. That doesn't mean anything is wrong with your credential.",
+    );
     expect(issuerRow(notLookedUp(), unavailable)).toBe("Springfield College — we couldn't load our list of known issuers");
   });
 
@@ -1431,7 +1433,7 @@ describe('when the host could not get its list of registries', () => {
       severity: 'unchecked',
       code: 'registry_unreachable',
       headline: "We couldn't confirm who issued this",
-      detail: "Some of our lists of known issuers didn't respond, so we don't know whether they're on them. That doesn't mean anything is wrong with your credential.",
+      detail: "Some of our lists of known issuers didn't respond, so we don't know whether the issuer is on one of them. That doesn't mean anything is wrong with your credential.",
     });
     expect(issuerRow(partlyReached())).toBe("Springfield College — some of our lists of known issuers didn't respond");
     expect(issuerIdentity(partlyReached()).registriesPartlyReached).toBe(true);
@@ -1445,7 +1447,9 @@ describe('when the host could not get its list of registries', () => {
   it('without the flag, a lookup that never ran still reads as unfinished', () => {
     const out = summarise(notLookedUp());
     expect(out.code).toBe('registry_unreachable');
-    expect(out.detail).toMatch(/^We couldn't finish checking our list of known issuers,/);
+    expect(out.detail).toBe(
+      "We couldn't finish checking our list of known issuers, so we don't know whether the issuer is on it. That doesn't mean anything is wrong with your credential.",
+    );
     expect(issuerIdentity(notLookedUp()).registriesUnreachable).toBe(false);
   });
 

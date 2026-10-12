@@ -1074,12 +1074,12 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
         severity: 'unchecked',
         code: 'registry_unreachable',
         headline: "We couldn't confirm who issued this",
-        detail: `Some of our lists of known issuers didn't respond, so we don't know whether they're on them. ${NOTHING_FOUND_WRONG}`,
+        detail: `Some of our lists of known issuers didn't respond, so we don't know whether the issuer is on one of them. ${NOTHING_FOUND_WRONG}`,
       };
     }
     const which = issuer.registriesUnreachable
-      ? "Our list of known issuers didn't load, so we don't know whether they're on it."
-      : "We couldn't finish checking our list of known issuers, so we don't know whether they're on it.";
+      ? "Our list of known issuers didn't load, so we don't know whether the issuer is on it."
+      : "We couldn't finish checking our list of known issuers, so we don't know whether the issuer is on it.";
     return {
       severity: 'unchecked',
       code: 'registry_unreachable',
