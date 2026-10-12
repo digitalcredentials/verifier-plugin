@@ -155,7 +155,7 @@ test("a seal made with someone else's key is not called tampering", async ({ pag
   expect(c.headline).toContain("We couldn't confirm who signed this");
   expect(`${c.headline} ${c.detail}`).not.toMatch(/tamper/i);
   expect(c.action).toBe('Ask the issuer for an official copy.');
-  expect(await detailRows(page)).toContainEqual(expect.stringContaining("the digital signature isn't theirs"));
+  expect(await detailRows(page)).toContainEqual(expect.stringContaining("the digital signature can't be tied to them"));
 });
 
 /**
@@ -390,6 +390,7 @@ test.describe('the three views', () => {
     await hostileCredential(page, 'error');
     const c = await card(page);
     expect(c.headline).toContain('couldn’t finish checking');
+    expect(c.detail).toBe('Something went wrong while checking it. That doesn’t mean anything is wrong with your credential.');
     expect(await pressedView(page)).toEqual(['Details']);
     const root = () => page.evaluate(() => {
       const r = document.getElementById('vc')!.shadowRoot!;
@@ -787,7 +788,7 @@ test.describe('when the host could not get its list of registries', () => {
     const c = await card(page);
     expect(c.severity).toBe('unchecked');
     expect(c.headline).toContain("We couldn't confirm who issued this");
-    expect(c.detail).toContain("Our list of known issuers didn't load.");
+    expect(c.detail).toContain("Our list of known issuers didn't load,");
     expect(await wholeCard(page)).toContain("we couldn't load our list of known issuers");
   });
 

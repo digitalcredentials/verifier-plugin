@@ -232,7 +232,7 @@ There are **four severity levels**, and that set doesn't grow:
 | **Success** | Everything checked out | Nothing |
 | **Warning** | Real, but with something worth knowing | Read it; maybe act |
 | **Error** | Don't rely on this | Contact the issuer |
-| **Couldn't check** | We weren't able to complete a check | Try again |
+| **Couldn't check** | We weren't able to complete a check | Try again, unless trying again can't help (see "Every problem says what to do") |
 
 Underneath, there is a **growing list of messages**, and each one maps to a
 severity. That list gets longer as we handle more cases. The severities don't.
@@ -387,8 +387,9 @@ Some specific changes, all cheap:
 - **No "registry" in front of the earner either.** Registries are what the
   issuer list *is* to us; to the earner it is "our list of known issuers". So
   a recognised issuer reads "Springfield College — a known issuer", an
-  unlisted one "not on our list of known issuers", and a registry that didn't
-  load "Our list of known issuers didn't load". The registry's name, and the
+  unlisted one "not on our list of known issuers", a list that didn't load
+  "Our list of known issuers didn't load", and part of it not responding
+  "Some of our lists of known issuers didn't respond". The registry's name, and the
   library's own wording, stay in the developer view. "Known" rather than
   "trusted": being listed is not an endorsement, and the word shouldn't claim
   one.
@@ -411,6 +412,12 @@ barrier on the main screen.
 
 The "what the person should do" column above is a requirement, not a note. A
 problem with no suggested action reads like an accusation.
+
+The exceptions are where nothing is wrong and there is nothing to fix: an
+issuer who isn't on our list (§5), and some of our lists of known issuers not
+responding. Several registries on the list don't let a browser read them, and
+from the browser that looks the same as one briefly down, so "try again"
+would be a promise that never comes good (10 October 2026).
 
 The advice has to match the cause, though. For a **withdrawn** credential the
 issuer already made their decision, so the useful advice is to ask for a
@@ -580,7 +587,10 @@ Two things we now know, from testing on 21 September:
 - **The result tells us which registry failed, by name.** That name is for
   developers, so it appears in the developer view. The earner reads "Our list
   of known issuers didn't load", because a registry's name means nothing to
-  them (James, 1 October 2026).
+  them (James, 1 October 2026) — or, when some registries answered and
+  others didn't, "Some of our lists of known issuers didn't respond". In a
+  browser that second one is the common case: several registries on the real
+  list don't let a browser read them (10 October 2026).
 - **It is distinguishable from "not listed" only if you look for it.** See the
   requirement at the end of section 4. Get this wrong and the fourth case
   silently becomes the second one.

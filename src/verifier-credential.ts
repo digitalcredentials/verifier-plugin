@@ -485,7 +485,7 @@ export class VerifierCredential extends HTMLElement {
           <span class="glyph s-unchecked" aria-hidden="true">${GLYPH['unchecked']}</span>
           <div>
             <p class="headline">We couldn’t finish checking this</p>
-            <p class="detail">Something went wrong at our end, not with your credential.</p>
+            <p class="detail">Something went wrong while checking it. That doesn’t mean anything is wrong with your credential.</p>
             <p class="action">Try again in a moment.</p>
           </div>
         </div>`;
