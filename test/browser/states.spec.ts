@@ -180,7 +180,9 @@ test('an unrecognised issuer is never called fake', async ({ page }) => {
   const c = await pick(page, 'Issuer unknown');
   expect(c.severity).not.toBe('error');
   expect(c.headline).toContain('Genuine');
-  expect(c.detail).toContain("doesn't mean the credential is fake");
+  // Neither "fake" nor "doesn't mean it's fake", which leans positive.
+  expect(c.detail).not.toMatch(/fake/i);
+  expect(c.detail).toContain('which is common');
 });
 
 test('an unreachable registry reads differently from an unlisted issuer', async ({ page }) => {
@@ -192,7 +194,7 @@ test('an unreachable registry reads differently from an unlisted issuer', async 
   expect(offline.headline).not.toBe(unknown.headline);
   expect(offline.severity).toBe('unchecked');
   // In the earner's terms, not the registry's name — that's in the developer view.
-  expect(offline.detail).toContain("Our list of known issuers didn't load");
+  expect(offline.detail).toContain("our list of known issuers didn't load");
   expect(offline.detail).not.toContain('Local Dev Registry');
   expect(offline.action).not.toBe('');
 });
@@ -389,8 +391,8 @@ test.describe('the three views', () => {
   test('a check that failed outright still shows the credential, and the error', async ({ page }) => {
     await hostileCredential(page, 'error');
     const c = await card(page);
-    expect(c.headline).toContain('couldn’t finish checking');
-    expect(c.detail).toBe('Something went wrong while checking it. That doesn’t mean anything is wrong with your credential.');
+    expect(c.headline).toContain("couldn't check this right now");
+    expect(c.detail).toBe("Something went wrong while we were checking, so we can't tell you yet whether it's valid.");
     expect(await pressedView(page)).toEqual(['Details']);
     const root = () => page.evaluate(() => {
       const r = document.getElementById('vc')!.shadowRoot!;
@@ -647,8 +649,8 @@ test.describe("an issuer's website that won't serve its key", () => {
       });
       const c = await card(page);
       expect(c.severity).toBe('unchecked');
-      expect(c.headline).toContain("We couldn't finish checking this");
-      expect(c.detail).toContain("we couldn't reach it");
+      expect(c.headline).toContain("We couldn't check this right now");
+      expect(c.detail).toContain("We couldn't reach the issuer's website");
     });
   }
 });
@@ -788,7 +790,7 @@ test.describe('when the host could not get its list of registries', () => {
     const c = await card(page);
     expect(c.severity).toBe('unchecked');
     expect(c.headline).toContain("We couldn't confirm who issued this");
-    expect(c.detail).toContain("Our list of known issuers didn't load,");
+    expect(c.detail).toContain("our list of known issuers didn't load,");
     expect(await wholeCard(page)).toContain("we couldn't load our list of known issuers");
   });
 
