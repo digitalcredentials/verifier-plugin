@@ -211,12 +211,12 @@ test("when the known-registries list doesn't load, the card says so and looks no
     await open(page, `./?vc=${base}fixtures/verified.json`);
     const c = await card(page);
     expect(c.severity, name).toBe('unchecked');
-    expect(c.detail, name).toContain("Our list of known issuers didn't load,");
+    expect(c.detail, name).toContain("our list of known issuers didn't load,");
   }
   expect(lookups).toEqual([]);
 });
 
-test("when part of the list doesn't respond, the card says so, with no try again", async ({ page }) => {
+test("when part of the list doesn't respond, the card says so", async ({ page }) => {
   // One registry answers without listing the issuer, one never answers: what
   // a browser meets on the real list, where several registries refuse it.
   // Here the second answers 404, since a route can't make Chromium refuse a
@@ -237,8 +237,8 @@ test("when part of the list doesn't respond, the card says so, with no try again
   const c = await card(page);
   expect(c.severity).toBe('unchecked');
   expect(c.headline).toContain("We couldn't confirm who issued this");
-  expect(c.detail).toBe("Some of our lists of known issuers didn't respond, so we don't know whether the issuer is on one of them. That doesn't mean anything is wrong with your credential.");
-  expect(c.action).toBe('');
+  expect(c.detail).toBe("It hasn't been tampered with, but some of our lists of known issuers didn't respond, so we can't say yet who issued it.");
+  expect(c.action).toBe('Try again in a little while.');
 });
 
 test('changing the link after # opens the new one', async ({ page }) => {

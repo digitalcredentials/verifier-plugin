@@ -24,6 +24,15 @@ const CLAIMS_UNCHANGED =
 const CLAIMS_NOT_WITHDRAWN =
   /n['’]t (?:been )?(?:withdrawn|revoked|cancelled|deactivated)\b|\bnot (?:been )?(?:withdrawn|revoked|cancelled|deactivated)\b|\bstill valid\b|(?<!whether (?:this|it|this copy) is )\bstill active\b/;
 
+/**
+ * Comfort where we don't know (James, 13 October 2026): a "couldn't check"
+ * that leans positive gets read as "close enough". It may state what did
+ * check out ("It hasn't been tampered with"); CLAIMS_UNCHANGED holds that to
+ * the signature row. What it may not do is reassure about what didn't.
+ */
+const LEANS_POSITIVE =
+  /\b(?:might|may|could|should|probably|likely) (?:still )?be (?:valid|fine|ok(?:ay)?|genuine|good|real|authentic)\b|\b(?:nothing|anything)(?:['’]s| is)? wrong\b|\bno problem with (?:it|this|your credential|the credential)\b|not with your credential|doesn['’]t (?:necessarily |always )?mean (?:it|the credential|this|anything)\b|\bprobably fine\b|\bdon['’]t worry\b/;
+
 describe('the claim patterns themselves', () => {
   it.each([
     "It hasn't been tampered with, and the issuer hasn't withdrawn it.",
@@ -51,14 +60,15 @@ describe('the claim patterns themselves', () => {
     "It's missing the issuer's digital signature — the part that proves it came from them and shows whether anyone has tampered with it.",
     'This credential has been tampered with',
     "Something in it was changed after it was issued. We can't tell what.",
-    "We couldn't check it for tampering. That doesn't mean anything is wrong with your credential.",
-    // The reassurance under every "couldn't check": it must never be read as
-    // saying the credential is unchanged or still active.
-    "That doesn't mean anything is wrong with your credential.",
-    'Something went wrong while checking it. That doesn’t mean anything is wrong with your credential.',
-    "Some of our lists of known issuers didn't respond, so we don't know whether the issuer is on one of them. That doesn't mean anything is wrong with your credential.",
-    "This copy says its status can be checked, but we couldn't finish that check, so we can't tell you either way. That doesn't mean anything is wrong with your credential.",
-    'Try again later. If it keeps happening, let the issuer know.',
+    // Every "couldn't check": neutral, so never read as saying the credential
+    // is unchanged or still active.
+    "We couldn't check this right now",
+    "Something went wrong while we were checking, so we can't tell you yet whether it's valid.",
+    "We couldn't reach the issuer's website, so we can't tell you yet whether it's valid.",
+    "This copy says its status can be checked, but we couldn't finish that check, so we can't tell you either way.",
+    "We couldn't get reliable status information from the issuer, so we can't tell you either way.",
+    'Try again in a little while.',
+    "Try again in a little while. If it still doesn't work, let the issuer know.",
     'This is no longer a valid credential.',
     "This copy is no longer valid. That doesn't always mean the achievement was taken back; issuers sometimes deactivate a copy to replace it, for example to correct a detail.",
     "This copy can't be relied on while it's on hold. This may be temporary.",
@@ -66,6 +76,31 @@ describe('the claim patterns themselves', () => {
   ])('does not read "%s" as a claim', (text) => {
     expect(text.toLowerCase()).not.toMatch(CLAIMS_UNCHANGED);
     expect(text.toLowerCase()).not.toMatch(CLAIMS_NOT_WITHDRAWN);
+  });
+
+  it.each([
+    'It might be valid.',
+    'It may still be valid.',
+    "It's probably fine.",
+    "That doesn't mean anything is wrong with your credential.",
+    "That's a problem at our end, not with your credential.",
+    "It doesn't mean the credential is fake.",
+    "Don't worry, nothing is wrong.",
+    "Nothing's wrong with it.",
+    "It should be fine.",
+    "There's no problem with your credential.",
+    "That doesn't necessarily mean it's invalid.",
+  ])('reads "%s" as leaning positive', (text) => {
+    expect(text.toLowerCase()).toMatch(LEANS_POSITIVE);
+  });
+
+  it.each([
+    "Something went wrong while we were checking, so we can't tell you yet whether it's valid.",
+    "It hasn't been tampered with, but some of our lists of known issuers didn't respond, so we can't say yet who issued it.",
+    "It says it was issued by Springfield College. They aren't on our list of known issuers, which is common.",
+    "This copy can't be relied on while it's on hold. This may be temporary.",
+  ])('does not read "%s" as leaning positive', (text) => {
+    expect(text.toLowerCase()).not.toMatch(LEANS_POSITIVE);
   });
 
   it.each([
@@ -536,7 +571,7 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
         // credential is authentic — it only reports how it was assembled. Not
         // having one therefore does not undermine a pass the way an unchecked
         // signature would, and must not drag the headline down to "we
-        // couldn't finish checking this".
+        // couldn't check this right now".
         const noSchemaToCheck = c.id === CHECK.schema && sch !== 'valid';
         if (noWithdrawalList || noSchemaToCheck) {
           expect(c.severity, `${where}: "${c.label}" under a pass`).toBe('unchecked');
@@ -578,6 +613,9 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
     // "our list of known issuers" (James, 1 October 2026). Every verdict and
     // every row, in every combination.
     const earnerProse = [out.headline, out.detail, out.action ?? '', ...rows.map((c) => c.value)].join(' ');
+    if (out.severity === 'unchecked') {
+      expect(earnerProse.toLowerCase(), `${where}: leans positive where we don't know`).not.toMatch(LEANS_POSITIVE);
+    }
     expect(earnerProse, `${where}: names a registry to the earner`).not.toMatch(/registry|registries/i);
 
     // When the verdict blames the list, the Issuer row has to be about the
@@ -662,12 +700,10 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
       expect(row(CHECK.registeredIssuer)?.severity, `${where}: issuer row`).not.toBe('success');
     }
 
-    // Every verdict that is not a pass names one thing to do, except where
-    // nothing is wrong and there is nothing to fix: the unconfirmed-issuer
-    // case (§5), and part of the list not responding, where a registry that
-    // blocks browsers would make "try again" a promise we can't keep.
-    const partlyReached = out.code === 'registry_unreachable' && issuerIdentity(r, options).registriesPartlyReached;
-    if (out.severity !== 'success' && out.code !== 'issuer_unconfirmed' && !partlyReached) {
+    // Every verdict that is not a pass names one thing to do, except the
+    // unconfirmed-issuer case, where §5 deliberately gives no instruction
+    // because nothing is wrong and there is nothing to fix.
+    if (out.severity !== 'success' && out.code !== 'issuer_unconfirmed') {
       expect(out.action, `${where}: no action offered`).toBeTruthy();
     }
   });

@@ -232,7 +232,7 @@ There are **four severity levels**, and that set doesn't grow:
 | **Success** | Everything checked out | Nothing |
 | **Warning** | Real, but with something worth knowing | Read it; maybe act |
 | **Error** | Don't rely on this | Contact the issuer |
-| **Couldn't check** | We weren't able to complete a check | Try again, unless trying again can't help (see "Every problem says what to do") |
+| **Couldn't check** | We weren't able to complete a check | Try again, or let the issuer know when only they can fix it |
 
 Underneath, there is a **growing list of messages**, and each one maps to a
 severity. That list gets longer as we handle more cases. The severities don't.
@@ -413,11 +413,27 @@ barrier on the main screen.
 The "what the person should do" column above is a requirement, not a note. A
 problem with no suggested action reads like an accusation.
 
-The exceptions are where nothing is wrong and there is nothing to fix: an
-issuer who isn't on our list (§5), and some of our lists of known issuers not
-responding. Several registries on the list don't let a browser read them, and
-from the browser that looks the same as one briefly down, so "try again"
-would be a promise that never comes good (10 October 2026).
+The exception is where nothing is wrong and there is nothing to fix: an
+issuer who isn't on our list (§5).
+
+There is no "let us know" yet. Until there is a support channel to send
+people to, asking them to report a problem promises something we can't
+receive, so a "couldn't check" says only "Try again in a little while" — or,
+where the issuer is the one who can fix it, to let them know (13 October
+2026).
+
+### Neutral where we don't know
+
+When a check couldn't finish, the wording must not accuse the credential —
+and must not lean the other way either. No "it might be valid", no "that
+doesn't mean anything is wrong with it", no "not with your credential":
+some people read any of those as "close enough" (James, 13 October 2026).
+What a "couldn't check" may say is what happened, what did check out ("It
+hasn't been tampered with", when the signature held), and what to do, in
+plain words: "We couldn't check this right now. Something went wrong while
+we were checking, so we can't tell you yet whether it's valid. Try again in
+a little while." Friendly, but never comforting about what we don't know.
+consistency.test.ts holds every verdict to this.
 
 The advice has to match the cause, though. For a **withdrawn** credential the
 issuer already made their decision, so the useful advice is to ask for a
@@ -546,9 +562,8 @@ right home for the raw identifier.
 > It hasn't been tampered with, and the issuer hasn't deactivated it.
 > *(The second half only when the issuer set up a way to deactivate it and the check came back clear.)*
 >
-> It says it was issued by **Springfield College**. We couldn't confirm that
-> independently — they aren't on our list of known issuers, which is common.
-> It doesn't mean the credential is fake.
+> It says it was issued by **Springfield College**. They aren't on our list of
+> known issuers, which is common.
 
 Four choices worth explaining:
 
@@ -571,9 +586,12 @@ college name. The identifier belongs in the details.
 **ⓘ, not ⚠.** A warning triangle says something is wrong. Nothing is wrong.
 Something is unknown.
 
-Both halves of the last sentence are doing work. "We couldn't confirm that"
-stops us overclaiming. "It doesn't mean the credential is fake" stops the
-false alarm. Neither works on its own.
+The last sentences used to read "We couldn't confirm that independently —
+they aren't on our list of known issuers, which is common. It doesn't mean
+the credential is fake." The headline already says we can't confirm the
+issuer, and "doesn't mean it's fake" leans positive about something we
+can't vouch for (13 October 2026, see "Neutral where we don't know"). "Which
+is common" is what stops it reading as an alarm.
 
 ### A fourth case
 

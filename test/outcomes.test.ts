@@ -282,7 +282,7 @@ describe("the traps that make a good credential look bad", () => {
     // Said in the earner's terms, not the registry's name (James, 1 October
     // 2026): the name is in the developer view.
     // One registry answered without them, one didn't answer: part of the list.
-    expect(summarise(unreachable).detail).toContain("Some of our lists of known issuers didn't respond");
+    expect(summarise(unreachable).detail).toContain("some of our lists of known issuers didn't respond");
     expect(summarise(unreachable).detail).not.toContain('DCC Registry');
     expect(summarise(notListed).detail).toContain("aren't on our list of known issuers");
   });
@@ -291,7 +291,11 @@ describe("the traps that make a good credential look bad", () => {
     const r = ok();
     set(r, notRegistered());
     const out = summarise(r);
-    expect(out.detail).toContain("doesn't mean the credential is fake");
+    // Neither an accusation nor comfort (13 October 2026): no "fake", and no
+    // "it doesn't mean it's fake" either, which leans positive. "Common" is
+    // what keeps it from reading as an alarm.
+    expect(out.detail).not.toMatch(/fake|forged|invalid/i);
+    expect(out.detail).toContain('which is common');
     expect(out.headline).toContain('Genuine');
     expect(out.severity).not.toBe('error');
   });
@@ -458,9 +462,9 @@ describe('a credential with no way to be withdrawn', () => {
     const out = summarise(r);
     expect(out.code).toBe('withdrawal_unknown');
     expect(out.detail).toBe(
-      "We couldn't get reliable status information from the issuer, so we can't tell you either way. That's a problem at their end, not with your credential.",
+      "We couldn't get reliable status information from the issuer, so we can't tell you either way.",
     );
-    expect(out.action).toBe('Try again in a moment.');
+    expect(out.action).toBe("Try again in a little while. If it still doesn't work, let the issuer know.");
     // The earner doesn't know there is a list; that belongs in the Developer view.
     expect(`${out.detail} ${out.action} ${withdrawal?.value}`).not.toMatch(/\blist(s|ed)?\b/i);
   });
@@ -1055,7 +1059,7 @@ describe('a withdrawal check that never ran', () => {
     expect(out.detail).not.toContain('reliable');
     expect(out.detail).not.toContain('recognise');
     expect(out.detail).toBe(
-      "This copy says its status can be checked, but we couldn't finish that check, so we can't tell you either way. That doesn't mean anything is wrong with your credential.",
+      "This copy says its status can be checked, but we couldn't finish that check, so we can't tell you either way.",
     );
     // The earner doesn't know there is a list; that belongs in the Developer view.
     expect(`${out.detail} ${out.action}`).not.toMatch(/\blist(s|ed)?\b/i);
@@ -1411,7 +1415,7 @@ describe('when the host could not get its list of registries', () => {
     expect(out.severity).toBe('unchecked');
     expect(out.headline).toBe("We couldn't confirm who issued this");
     expect(out.detail).toBe(
-      "Our list of known issuers didn't load, so we don't know whether the issuer is on it. That doesn't mean anything is wrong with your credential.",
+      "It hasn't been tampered with, but our list of known issuers didn't load, so we can't say yet who issued it.",
     );
     expect(issuerRow(notLookedUp(), unavailable)).toBe("Springfield College — we couldn't load our list of known issuers");
   });
@@ -1427,19 +1431,20 @@ describe('when the host could not get its list of registries', () => {
     expect(a.registriesUnreachable).toBe(true);
   });
 
-  it('reads part of the list not responding as that, with no "try again"', () => {
+  it('reads part of the list not responding as that', () => {
     const out = summarise(partlyReached());
     expect(out).toEqual({
       severity: 'unchecked',
       code: 'registry_unreachable',
       headline: "We couldn't confirm who issued this",
-      detail: "Some of our lists of known issuers didn't respond, so we don't know whether the issuer is on one of them. That doesn't mean anything is wrong with your credential.",
+      detail: "It hasn't been tampered with, but some of our lists of known issuers didn't respond, so we can't say yet who issued it.",
+      action: 'Try again in a little while.',
     });
     expect(issuerRow(partlyReached())).toBe("Springfield College — some of our lists of known issuers didn't respond");
     expect(issuerIdentity(partlyReached()).registriesPartlyReached).toBe(true);
     // Every registry down is the whole list, not part of it, and may clear.
     expect(issuerIdentity(offline()).registriesPartlyReached).toBe(false);
-    expect(summarise(offline()).action).toBe('Try again in a moment.');
+    expect(summarise(offline()).action).toBe('Try again in a little while.');
     // A host's failed list is never "part of it": nothing was looked up.
     expect(issuerIdentity(notLookedUp(), unavailable).registriesPartlyReached).toBe(false);
   });
@@ -1448,7 +1453,7 @@ describe('when the host could not get its list of registries', () => {
     const out = summarise(notLookedUp());
     expect(out.code).toBe('registry_unreachable');
     expect(out.detail).toBe(
-      "We couldn't finish checking our list of known issuers, so we don't know whether the issuer is on it. That doesn't mean anything is wrong with your credential.",
+      "It hasn't been tampered with, but we couldn't finish checking our list of known issuers, so we can't say yet who issued it.",
     );
     expect(issuerIdentity(notLookedUp()).registriesUnreachable).toBe(false);
   });
@@ -1758,14 +1763,31 @@ describe('findings from the review of the verifier-core main adaptation', () => 
     expect(out.detail).not.toMatch(/tamper/i);
   });
 
-  it("asks for a retry later, and to tell the issuer, when their website can't be reached", () => {
+  // One message for every "something went wrong" while checking the seal;
+  // the cause is in the developer view (13 October 2026).
+  it.each([
+    ['a seal check that failed without a cause we can name', PROBLEM.proofVerification],
+    ['something it needed that did not load', PROBLEM.httpError],
+  ])('says the same plain thing for %s', (_, type) => {
+    const r = ok();
+    set(r, fail(CHECK.signature, [{ type, title: 't', detail: 'd' }], true));
+    set(r, skip(CHECK.status, NOT_RUN('proof.signature')));
+    expect(summarise(r)).toMatchObject({
+      severity: 'unchecked',
+      headline: "We couldn't check this right now",
+      detail: "Something went wrong while we were checking, so we can't tell you yet whether it's valid.",
+      action: 'Try again in a little while.',
+    });
+  });
+
+  it("asks for a retry, and to tell the issuer, when their website can't be reached", () => {
     // A site briefly down comes back; a key file that's gone (404) won't, and
-    // only the issuer can put it back. "Try again in a moment" helped only
-    // the first.
+    // only the issuer can put it back. A bare "try again" helped only the
+    // first.
     const r = ok();
     set(r, fail(CHECK.signature, [{ type: PROBLEM.didWebUnresolved, title: 't', detail: 'd' }], true));
     set(r, skip(CHECK.status, NOT_RUN('proof.signature')));
-    expect(summarise(r).action).toBe('Try again later. If it keeps happening, let the issuer know.');
+    expect(summarise(r).action).toBe("Try again in a little while. If it still doesn't work, let the issuer know.");
   });
 
   it('says the issuer was not checked after the withdrawal check stopped everything', () => {

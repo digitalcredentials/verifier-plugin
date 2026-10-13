@@ -640,12 +640,21 @@ const anyJsonLdError = (check: CheckResult | undefined): boolean =>
   );
 
 /**
- * The reassurance under every "couldn't check": true whatever went wrong,
- * since not knowing is never a finding against the credential. One copy, so
- * the wording can't drift between verdicts; consistency.test.ts checks it is
- * never read as a claim.
+ * What the earner reads when a check couldn't finish. Neutral both ways
+ * (James, 13 October 2026): a "couldn't check" must not accuse the
+ * credential, and must not lean the other way either — no "it might be
+ * valid", no "nothing is wrong with it" — since some people would read that
+ * as close enough. It says what happened and what to do, in plain words.
+ *
+ * No "let us know": there is no support channel to send anyone to yet.
  */
-const NOTHING_FOUND_WRONG = "That doesn't mean anything is wrong with your credential.";
+const TRY_AGAIN = 'Try again in a little while.';
+const TRY_AGAIN_THEN_ISSUER = `${TRY_AGAIN} If it still doesn't work, let the issuer know.`;
+export const COULD_NOT_CHECK = {
+  headline: "We couldn't check this right now",
+  detail: "Something went wrong while we were checking, so we can't tell you yet whether it's valid.",
+  action: TRY_AGAIN,
+} as const;
 
 const FATAL: Record<string, Omit<Outcome, 'code'>> = {
   unreadable_vocabulary: {
@@ -724,27 +733,18 @@ const FATAL: Record<string, Omit<Outcome, 'code'>> = {
   // arrives as INVALID_SIGNATURE and reads as tampering (verified against the
   // library, 7 October 2026; verifier-core#65). Reading the sentence here
   // instead would bring back the prose-matching this file shed.
-  http_error_with_signature_check: {
-    severity: 'unchecked',
-    headline: "We couldn't finish checking this",
-    detail: `Something we needed didn't load. ${NOTHING_FOUND_WRONG}`,
-    action: 'Try again in a moment.',
-  },
+  http_error_with_signature_check: { severity: 'unchecked', ...COULD_NOT_CHECK },
   did_web_unresolved: {
     severity: 'unchecked',
-    headline: "We couldn't finish checking this",
-    detail:
-      "The issuer publishes their details on their own website, and we couldn't reach it.",
-    // "Later", and who to tell: a site briefly down comes back, but a key
+    headline: COULD_NOT_CHECK.headline,
+    detail: "We couldn't reach the issuer's website, so we can't tell you yet whether it's valid.",
+    // Who to tell, as well as when: a site briefly down comes back, but a key
     // file that's gone (404) won't, and only the issuer can put it back.
-    action: 'Try again later. If it keeps happening, let the issuer know.',
+    action: TRY_AGAIN_THEN_ISSUER,
   },
-  unknown_error: {
-    severity: 'unchecked',
-    headline: "We couldn't finish checking this",
-    detail: 'Something went wrong that we cannot describe more precisely.',
-    action: 'Try again in a moment.',
-  },
+  // The cause is in the developer view; to the earner, one message for every
+  // "something went wrong" (13 October 2026).
+  unknown_error: { severity: 'unchecked', ...COULD_NOT_CHECK },
 };
 
 /**
@@ -754,10 +754,7 @@ const FATAL: Record<string, Omit<Outcome, 'code'>> = {
  */
 const UNCHECKED_SIGNATURE: Omit<Outcome, 'code'> = {
   severity: 'unchecked',
-  headline: "We couldn't finish checking this",
-  detail:
-    `We couldn't check it for tampering. ${NOTHING_FOUND_WRONG}`,
-  action: 'Try again in a moment.',
+  ...COULD_NOT_CHECK,
 };
 
 /**
@@ -1023,7 +1020,7 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
         // "May not be", not "isn't": we know who signed the list, not whether
         // the issuer asked them to.
         detail:
-          "The status information we found may not be from the issuer, so we can't rely on it. That's a problem at their end, not with your credential.",
+          "The status information we found may not be from the issuer, so we can't rely on it.",
         // Trying again changes nothing; the list has to be fixed at source.
         // The action is a sentence the earner can pass on as it is, so it
         // says what couldn't be checked.
@@ -1038,9 +1035,11 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
       // doesn't know exists. Not "couldn't load" either: an expired list, or
       // one that loaded but didn't verify, lands here too.
       detail: revocationError
-        ? "We couldn't get reliable status information from the issuer, so we can't tell you either way. That's a problem at their end, not with your credential."
-        : `This copy says its status can be checked, but we couldn't finish that check, so we can't tell you either way. ${NOTHING_FOUND_WRONG}`,
-      action: 'Try again in a moment.',
+        ? "We couldn't get reliable status information from the issuer, so we can't tell you either way."
+        : "This copy says its status can be checked, but we couldn't finish that check, so we can't tell you either way.",
+      // Unreliable information is the issuer's to fix if it persists; an
+      // unfinished check may be ours, or the reader's connection.
+      action: revocationError ? TRY_AGAIN_THEN_ISSUER : TRY_AGAIN,
     };
   }
 
@@ -1066,26 +1065,19 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
     // list of known issuers" is what it is to them. Which registry failed is
     // in the developer view.
     //
-    // Part of the list not responding gets no "try again": a registry that
-    // won't let a browser read it never will, and from here that looks the
-    // same as one briefly down. The other two may well clear on a retry.
-    if (issuer.registriesPartlyReached) {
-      return {
-        severity: 'unchecked',
-        code: 'registry_unreachable',
-        headline: "We couldn't confirm who issued this",
-        detail: `Some of our lists of known issuers didn't respond, so we don't know whether the issuer is on one of them. ${NOTHING_FOUND_WRONG}`,
-      };
-    }
-    const which = issuer.registriesUnreachable
-      ? "Our list of known issuers didn't load, so we don't know whether the issuer is on it."
-      : "We couldn't finish checking our list of known issuers, so we don't know whether the issuer is on it.";
+    // It opens with what did check out: the seal held, which this branch
+    // requires, so "It hasn't been tampered with" is a finding, not comfort.
+    const which = issuer.registriesPartlyReached
+      ? "some of our lists of known issuers didn't respond"
+      : issuer.registriesUnreachable
+        ? "our list of known issuers didn't load"
+        : "we couldn't finish checking our list of known issuers";
     return {
       severity: 'unchecked',
       code: 'registry_unreachable',
       headline: "We couldn't confirm who issued this",
-      detail: `${which} ${NOTHING_FOUND_WRONG}`,
-      action: 'Try again in a moment.',
+      detail: `It hasn't been tampered with, but ${which}, so we can't say yet who issued it.`,
+      action: TRY_AGAIN,
     };
   }
 
@@ -1101,7 +1093,11 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
     const says =
       issuer.source === 'none'
         ? "It doesn't give a name for its issuer, only an identifier."
-        : `It says it was issued by ${issuer.name}. We couldn't confirm that independently — they aren't on our list of known issuers, which is common. It doesn't mean the credential is fake.`;
+        : // Not "it doesn't mean the credential is fake": it leans positive,
+          // which a reader can take as "close enough" (13 October 2026). The
+          // headline already says we can't confirm the issuer, and "which is
+          // common" keeps it from reading as an alarm.
+          `It says it was issued by ${issuer.name}. They aren't on our list of known issuers, which is common.`;
     return {
       severity: 'unchecked',
       code: 'issuer_unconfirmed',

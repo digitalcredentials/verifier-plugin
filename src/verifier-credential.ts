@@ -30,6 +30,7 @@
 
 import { verify, type Registry } from './verify.js';
 import {
+  COULD_NOT_CHECK,
   summarise,
   listChecks,
   issuerIdentity,
@@ -462,7 +463,7 @@ export class VerifierCredential extends HTMLElement {
   #spokenResult(): string {
     if (this.#state === 'checking') return 'Checking this credential.';
     if (this.#state === 'failed' || !this.#outcome) {
-      return 'We couldn’t finish checking this credential.';
+      return `${COULD_NOT_CHECK.headline}.`;
     }
     const o = this.#outcome;
     // An expired credential's headline says it all, so its detail can be empty.
@@ -484,9 +485,9 @@ export class VerifierCredential extends HTMLElement {
         <div class="${cls}">
           <span class="glyph s-unchecked" aria-hidden="true">${GLYPH['unchecked']}</span>
           <div>
-            <p class="headline">We couldn’t finish checking this</p>
-            <p class="detail">Something went wrong while checking it. That doesn’t mean anything is wrong with your credential.</p>
-            <p class="action">Try again in a moment.</p>
+            <p class="headline">${esc(COULD_NOT_CHECK.headline)}</p>
+            <p class="detail">${esc(COULD_NOT_CHECK.detail)}</p>
+            <p class="action">${esc(COULD_NOT_CHECK.action)}</p>
           </div>
         </div>`;
     }
@@ -531,7 +532,7 @@ export class VerifierCredential extends HTMLElement {
     }
     if (this.#view === 'json') return jsonHtml(this.#credential);
     if (failed) {
-      return `<p class="empty">We couldn’t finish checking, so there are no details to show. ${esc(VIEWS[1].label)} shows the error.</p>`;
+      return `<p class="empty">We couldn’t check this, so there are no details to show. ${esc(VIEWS[1].label)} shows the error.</p>`;
     }
     // Verification that stopped early has no rows to show — but it did not
     // stop the library: a fatal failure ends only its own suite, and the
