@@ -200,6 +200,72 @@ test('an unreachable registry reads differently from an unlisted issuer', async 
 });
 
 /**
+ * On a phone the Details rows stack and long values wrap. The mark beside a
+ * value used to stay at the row's left edge once its text wrapped, a column
+ * away from the right-aligned words it belongs to.
+ */
+const rowLayout = (page: Page) =>
+  page.evaluate(() =>
+    [...document.getElementById('vc')!.shadowRoot!.querySelectorAll('.check')].map((row) => {
+      const mark = row.querySelector('.mark')!.getBoundingClientRect();
+      // The words alone, one rectangle per line, without the hidden label
+      const range = document.createRange();
+      range.selectNodeContents(row.querySelector('.mark + span')!.lastChild!);
+      const lines = [...range.getClientRects()];
+      const first = lines[0]!;
+      return {
+        label: row.querySelector('.k')!.textContent,
+        lines: lines.length,
+        sameLine: Math.abs(mark.top + mark.height / 2 - (first.top + first.height / 2)) < 6,
+        gap: first.left - mark.right,
+      };
+    }),
+  );
+
+for (const situation of ['Registry offline', 'Untrusted list']) {
+  test(`each Details mark stays beside its text when the text wraps (${situation})`, async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 900 });
+    await pick(page, situation);
+    const rows = await rowLayout(page);
+    // At this width a row wraps, so this is about wrapped text
+    expect(rows.some((r) => r.lines > 1), 'no row wrapped').toBe(true);
+    for (const r of rows) {
+      expect(r.sameLine, `${r.label}: the mark is on a line of its own`).toBe(true);
+      expect(r.gap, `${r.label}: gap between the mark and its text`).toBeGreaterThanOrEqual(0);
+      expect(r.gap, `${r.label}: gap between the mark and its text`).toBeLessThan(10);
+    }
+  });
+}
+
+test("a value too long for the row, such as an issuer's did:key, stays inside the card", async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 900 });
+  await pick(page, 'Issuer unknown');
+  const layout = await page.evaluate(() => {
+    const root = document.getElementById('vc')!.shadowRoot!;
+    // An issuer with no name is shown by its identifier, which no demo
+    // credential has; the Issuer row is given one to lay out.
+    const row = [...root.querySelectorAll('.check')].find((r) => r.querySelector('.k')!.textContent === 'Issuer')!;
+    const text = row.querySelector('.mark + span')!.lastChild!;
+    text.textContent = 'did:key:z6MknNQD1WHLGGraFi6zcbGevuAgkVfdyCdtZnQTGWVVvR5Q — not on our list of known issuers';
+    const card = root.querySelector('.card')!;
+    const mark = row.querySelector('.mark')!.getBoundingClientRect();
+    const range = document.createRange();
+    range.selectNodeContents(text);
+    const first = range.getClientRects()[0]!;
+    return {
+      fits: card.scrollWidth <= card.clientWidth,
+      // Too long to sit beside it, so on the line just above, at the right
+      above: first.top - mark.bottom,
+      fromRight: Math.abs(mark.right - first.right),
+    };
+  });
+  expect(layout.fits, 'the identifier runs off the card').toBe(true);
+  expect(layout.above, 'the mark is not just above the identifier').toBeGreaterThanOrEqual(-2);
+  expect(layout.above, 'the mark is not just above the identifier').toBeLessThan(10);
+  expect(layout.fromRight, 'the mark is not at the right, over the identifier').toBeLessThan(10);
+});
+
+/**
  * Found in review. The spoken headline was HTML-escaped on its way into a
  * `textContent` assignment, so a screen reader on the unconfirmed-issuer card
  * heard "we can&#39;t confirm who issued this". Only a headline carrying an

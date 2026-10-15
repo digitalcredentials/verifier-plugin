@@ -643,6 +643,22 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
       );
     }
 
+    // The same for the Status row: when the verdict says we couldn't check
+    // whether the copy is still active, the row gives the same reason. "Not
+    // checked" is the row agreed for "we couldn't finish that check" (see
+    // outcomes.test.ts, "reads the same way in the breakdown"). A verdict with
+    // none of the three reasons fails, rather than matching by default.
+    if (out.code === 'withdrawal_unknown') {
+      const reasons: [RegExp, string][] = [
+        [/may not be from the issuer/, "couldn't check — the information we found may not be from the issuer"],
+        [/couldn't get reliable status information/, "couldn't check — no reliable status information"],
+        [/couldn't finish that check/, 'not checked'],
+      ];
+      const expected = reasons.find(([said]) => said.test(out.detail))?.[1];
+      expect(expected, `${where}: a reason this rule doesn't know: "${out.detail}"`).toBeDefined();
+      expect(row(CHECK.status)?.value, `${where}: the verdict and the Status row give different reasons`).toBe(expected);
+    }
+
     if (CLAIMS_UNCHANGED.test(claims)) {
       expect(
         row(CHECK.signature)?.severity,

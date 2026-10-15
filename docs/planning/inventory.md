@@ -12,6 +12,11 @@ published, not from documentation. The refined fork
 non-blocking severity; it is **not published to npm**, so anything depending on
 it depends on a git reference until it lands upstream.
 
+*Since then (October 2026):* the fork's work has landed upstream, as 2.x on
+`digitalcredentials/verifier-core`'s main. 2.x is still not on npm (the latest
+there is 1.0.0-beta.11), so verifier-plugin depends on it by git commit. This
+document still describes 1.0.0-beta.11.
+
 A note on wording: the library's own code calls each individual check a
 **step** (`VerificationStep`, `constants/verificationSteps.js`). This document
 uses *step* for an individual check and *layer* for a group of them, avoiding
