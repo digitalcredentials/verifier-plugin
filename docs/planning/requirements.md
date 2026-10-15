@@ -541,7 +541,9 @@ an altered credential, or one with no seal at all — the issuer's name in the
 card's header carries "(unconfirmed)", as it already does for an issuer no
 registry lists. Otherwise the header would show a plain name directly above
 a row saying we can't confirm the credential came from them. For the same
-reason, the suggested action says "the issuer" rather than naming them.
+reason, the suggested action says "the issuer" rather than naming them. It
+says "the issuer" too when the credential gives no name, only an identifier:
+no one can act on "Ask did:key:z6Mkn… for a current copy".
 
 This replaced a blanket caveat — "These details are what the file says. We
 can't confirm any of them." — which sat directly above a green issuer row and

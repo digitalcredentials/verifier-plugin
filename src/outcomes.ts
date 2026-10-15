@@ -71,6 +71,12 @@ export type IssuerNameSource =
 
 export interface IssuerIdentity {
   name: string;
+  /**
+   * Whether the issuer has a name to show. Without one, `name` is its bare
+   * identifier, or "Unknown issuer" when there isn't one either: fine as a
+   * label, not mid-sentence.
+   */
+  nameGiven: boolean;
   source: IssuerNameSource;
   /** Named registries that recognised them. */
   registries: string[];
@@ -469,7 +475,10 @@ export const issuerIdentity = (r: VerificationResponse, options: OutcomeOptions 
     | { id?: string; name?: string }
     | undefined;
   const id = typeof rawIssuer === 'string' ? rawIssuer : rawIssuer?.id;
-  const claimedName = typeof rawIssuer === 'string' ? undefined : rawIssuer?.name;
+  // Only a name someone can read, trimmed so it sits in a sentence cleanly: an
+  // empty or blank one leaves the issuer unnamed, rather than named "".
+  const rawName: unknown = typeof rawIssuer === 'string' ? undefined : rawIssuer?.name;
+  const claimedName = (typeof rawName === 'string' ? rawName.trim() : '') || undefined;
 
   // 2.x carries no registry payload, so there is no registry-sourced name to
   // prefer over the credential's own. See registryNames().
@@ -481,6 +490,7 @@ export const issuerIdentity = (r: VerificationResponse, options: OutcomeOptions 
   if (passed(step)) {
     return {
       name: registryName ?? claimedName ?? id ?? 'Unknown issuer',
+      nameGiven: (registryName ?? claimedName) !== undefined,
       source: 'registry',
       registries,
       unreachable,
@@ -499,6 +509,7 @@ export const issuerIdentity = (r: VerificationResponse, options: OutcomeOptions 
   if (claimedName)
     return {
       name: claimedName,
+      nameGiven: true,
       source,
       registries,
       unreachable,
@@ -512,6 +523,7 @@ export const issuerIdentity = (r: VerificationResponse, options: OutcomeOptions 
   // "unconfirmed" while the verdict says we simply don't know.
   return {
     name: id ?? 'Unknown issuer',
+    nameGiven: false,
     source: nothingEstablished
       ? 'unverifiable'
       : registriesUnreachable || !registryAnswered(step)
@@ -865,8 +877,10 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
 
   // An action names the issuer only when the seal held. Otherwise the name is
   // the credential's own claim, which the Issuer row says we can't confirm,
-  // and telling someone to go to that name would contradict it.
-  const named = sealHeld(checks) ? issuer.name : undefined;
+  // and telling someone to go to that name would contradict it. And only when
+  // there is a name: "Ask did:key:z6Mk… for a current copy" isn't something
+  // the earner can act on.
+  const named = sealHeld(checks) && issuer.nameGiven ? issuer.name : undefined;
 
   // Nothing below describes a credential that was altered, so this leads.
   if (isTampered(checks)) {
@@ -1014,11 +1028,9 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
         headline: "We couldn't check whether this copy is still active",
         // The earner doesn't know there is a list, let alone who signs it, so
         // the detail says what we couldn't find out, not how we look. It says
-        // "the issuer" rather than the name: the seal held here, so the name is
-        // always set, but for an issuer that gives none it is the bare
-        // identifier or "Unknown issuer", which reads badly mid-sentence.
-        // "May not be", not "isn't": we know who signed the list, not whether
-        // the issuer asked them to.
+        // "the issuer" rather than the name, which the action below carries
+        // when there is one. "May not be", not "isn't": we know who signed the
+        // list, not whether the issuer asked them to.
         detail:
           "The status information we found may not be from the issuer, so we can't rely on it.",
         // Trying again changes nothing; the list has to be fixed at source.
@@ -1091,7 +1103,7 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
     // requirements.md §5: one sentence, not two verdicts, and ⓘ rather than ⚠.
     // Nothing is wrong here. Something is unknown.
     const says =
-      issuer.source === 'none'
+      !issuer.nameGiven
         ? "It doesn't give a name for its issuer, only an identifier."
         : // Not "it doesn't mean the credential is fake": it leans positive,
           // which a reader can take as "close enough" (13 October 2026). The
