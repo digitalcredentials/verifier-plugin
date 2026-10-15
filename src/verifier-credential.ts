@@ -182,10 +182,14 @@ const styles = `
   @container (max-width: 380px) { .check { grid-template-columns: 1fr; } }
   .check:last-child { border-bottom: 0; }
   .check .k { color: var(--vp-ink-2, #47536a); }
-  .check .v { display: inline-flex; gap: 6px; align-items: flex-start; justify-content: flex-end;
-              text-align: right; font-weight: 500; }
-  .mark { width: 15px; height: 15px; border-radius: 50%; display: grid; place-items: center;
-          font-size: 10px; font-weight: 700; color: #fff; flex: 0 0 auto; margin-top: 3px; }
+  /* The mark sits inline, at the start of the value's first line. As a flex
+     item beside the text, it stayed at the left edge once the text wrapped,
+     a column away from the right-aligned words it belongs to. A word too long
+     for the row, such as an issuer's did:key, breaks rather than running off
+     the card; the mark then sits just above it. */
+  .check .v { text-align: right; font-weight: 500; overflow-wrap: anywhere; }
+  .mark { width: 15px; height: 15px; border-radius: 50%; display: inline-grid; place-items: center;
+          font-size: 10px; font-weight: 700; color: #fff; vertical-align: 2px; margin-right: 2px; }
   .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
              overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
@@ -569,10 +573,8 @@ const announce = (severity: string, headline: string): string => {
 const checkHtml = (c: Check): string => `
   <div class="check">
     <span class="k">${esc(c.label)}</span>
-    <span class="v">
-      <span class="mark s-${c.severity}" aria-hidden="true">${GLYPH[c.severity]}</span>
-      <span><span class="sr-only">${CHECK_LABEL[c.severity]}: </span>${esc(c.value)}</span>
-    </span>
+    <span class="v"><span class="mark s-${c.severity}" aria-hidden="true">${GLYPH[c.severity]}</span>
+      <span><span class="sr-only">${CHECK_LABEL[c.severity]}: </span>${esc(c.value)}</span></span>
   </div>`;
 
 /**

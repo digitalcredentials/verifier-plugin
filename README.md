@@ -267,11 +267,18 @@ npm run test:browser  # the component, in Chromium, verifying for real
 npm run dev         # look at it
 npm run fixtures    # rebuild the test credentials
 
-# the published site, built and tested locally
+# the published site, built locally to look at
 npm run build:site -- http://localhost:4173/verifier-plugin/
 npx vite preview --mode site --port 4173
-PLAYWRIGHT_BASE_URL=http://localhost:4173/verifier-plugin/ npm run test:browser
+
+# the browser tests, against a published copy (a pull request's preview)
+PLAYWRIGHT_BASE_URL=https://digitalcredentials.github.io/verifier-plugin/pr-<number>/ npm run test:browser
 ```
+
+A site built locally is for looking at, not for the browser tests: in a
+build, verifier-core fetches only `https` addresses, and a local server is
+`http`, so every withdrawal list is refused and most of the tests fail. The preview below is
+the real check.
 
 ### The published site
 
