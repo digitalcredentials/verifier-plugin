@@ -590,6 +590,25 @@ describe('an action names the issuer only when the seal held', () => {
     expect(out.code).toBe('withdrawn');
     expect(out.action).toBe('Ask the issuer for a current copy.');
   });
+
+  it.each([
+    ['only an identifier', 'did:key:z6Mkn'],
+    ['an identifier and no name', { id: 'did:key:z6Mkn' }],
+    ['an empty name', { id: 'did:key:z6Mkn', name: '' }],
+    ['a blank name', { id: 'did:key:z6Mkn', name: '  ' }],
+  ])('says "the issuer" when the credential gives %s', (_, issuer) => {
+    const r = ok();
+    r.verifiableCredential = { ...r.verifiableCredential, issuer };
+    revoke(r);
+    expect(summarise(r).action).toBe('Ask the issuer for a current copy.');
+  });
+
+  it('trims spaces around a name', () => {
+    const r = ok();
+    r.verifiableCredential = { ...r.verifiableCredential, issuer: { id: 'did:key:z6Mkn', name: ' Springfield College ' } };
+    revoke(r);
+    expect(summarise(r).action).toBe('Ask Springfield College for a current copy.');
+  });
 });
 
 describe('the issuer name carries where it came from', () => {

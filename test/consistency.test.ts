@@ -709,6 +709,34 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
   });
 });
 
+/**
+ * Open Badges 3.0 requires an issuer's id and type, not its name, so a genuine
+ * credential can give no name at all. The verdict then says "the issuer":
+ * "Ask did:key:z6Mk… for a current copy" isn't something the earner can act
+ * on. The Issuer row may show the identifier; it is labelled, not a sentence.
+ */
+const NAMELESS: [string, unknown][] = [
+  ['only an identifier', 'did:key:z6Mkn'],
+  ['an identifier and no name', { id: 'did:key:z6Mkn' }],
+  ['an empty name', { id: 'did:key:z6Mkn', name: '' }],
+  ['a blank name', { id: 'did:key:z6Mkn', name: '  ' }],
+  ['neither a name nor an identifier', {}],
+];
+
+describe(`an issuer with no name is never addressed by its identifier (${cases.length} combinations each)`, () => {
+  it.each(NAMELESS)('%s', (_, issuer) => {
+    for (const { sig, rev, end, iss, sch, list } of cases) {
+      const r = build(sig, rev, end, iss, sch);
+      r.verifiableCredential = { ...r.verifiableCredential, issuer };
+      const out = summarise(r, { registriesUnavailable: list === 'unavailable' });
+      // Two spaces in a row: an empty name dropped into a sentence.
+      for (const sentence of [out.headline, out.detail, out.action ?? '']) {
+        expect(sentence, `${sig}/${rev}/${end}/${iss}/${sch}/${list} → ${out.code}`).not.toMatch(/did:|Unknown issuer|\s\s/);
+      }
+    }
+  });
+});
+
 describe('a credential that is both withdrawn and expired', () => {
   // The contradiction the 2.x migration introduced and this file exists to
   // catch: expiry moved ahead of withdrawal, so the headline was a warning
