@@ -588,13 +588,17 @@ describe('an action names the issuer only when the seal held', () => {
     expect(summarise(r).action).toBe('Ask Springfield College for a current copy.');
   });
 
-  it('says "the issuer" when the seal never reported', () => {
+  it('names nobody, and believes no withdrawal, when the seal never reported', () => {
+    // Which entry of the list is this credential's is its own claim, so a
+    // withdrawal behind an unchecked seal is no more believed than an expiry.
+    // The library halts after a failed seal; the rule must not depend on it.
     const r = ok();
     revoke(r);
     remove(r, CHECK.signature);
     const out = summarise(r);
-    expect(out.code).toBe('withdrawn');
-    expect(out.action).toBe('Ask the issuer for a current copy.');
+    expect(out.code).toBe('signature_unchecked');
+    expect(`${out.headline} ${out.detail} ${out.action}`).not.toContain('Springfield College');
+    expect(listChecks(r).find((c) => c.id === CHECK.status)).toMatchObject({ severity: 'unchecked', value: 'not checked' });
   });
 
   it.each([
@@ -1891,6 +1895,35 @@ describe('an expired credential, now that expiry stops nothing after it', () => 
       severity: 'success',
       value: 'Springfield College — a known issuer',
     });
+  });
+});
+
+describe('the Status row behind a seal that did not hold', () => {
+  // verifier-plugin#32. Whether a credential has a status list, and which
+  // entry of it is its own, are the credential's claims; behind a broken
+  // seal they are worth nothing, so the row says "not checked".
+  it.each([
+    ['tampered', () => tamperedSignature()],
+    ['unreachable', () => fail(CHECK.signature, [{ type: PROBLEM.didWebUnresolved, title: 't', detail: 'd' }], true)],
+  ])('reads "not checked" when the seal is %s and there is no list', (_, signature) => {
+    const r = ok();
+    r.verifiableCredential = { ...withoutStatusList };
+    remove(r, CHECK.status);
+    set(r, signature());
+    expect(row(r, CHECK.status)).toMatchObject({ severity: 'unchecked', value: 'not checked' });
+  });
+
+  it('reads "not checked" when the seal is tampered and the list came back clear', () => {
+    const r = ok();
+    set(r, tamperedSignature());
+    expect(row(r, CHECK.status)).toMatchObject({ severity: 'unchecked', value: 'not checked' });
+  });
+
+  it('still says the issuer set up no way to deactivate it, behind a seal that held', () => {
+    const r = ok();
+    r.verifiableCredential = { ...withoutStatusList };
+    remove(r, CHECK.status);
+    expect(row(r, CHECK.status)?.value).toBe('the issuer set up no way to deactivate this');
   });
 });
 
