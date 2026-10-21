@@ -14,8 +14,6 @@
  *
  *   FIXTURES_STATUS_LIST_URL  where the withdrawal list will be served
  *   FIXTURES_OUT              the folder to write into
- *   FIXTURES_SCHEMA_URL       a schema for the credentials to name; unset or
- *                             empty, they name none (see below)
  */
 
 import { writeFile, mkdir } from 'node:fs/promises';
@@ -43,12 +41,6 @@ const OUT =
  */
 const STATUS_LIST_URL =
   process.env.FIXTURES_STATUS_LIST_URL ?? 'http://localhost:5180/fixtures/status-list.json';
-/**
- * Unset, the credentials name no schema, and verifier-core falls back to the
- * Open Badges schema on purl.imsglobal.org. The cross-site browser tests set
- * it to a copy on their own server: see test/browser/pages-like-server.js.
- */
-const SCHEMA_URL = process.env.FIXTURES_SCHEMA_URL;
 const WITHDRAWN_INDEX = 42;
 const LIST_LENGTH = 131072;
 
@@ -96,10 +88,6 @@ const baseCredential = (issuerDid, overrides = {}) => ({
       criteria: { narrative: 'Completed all coursework and the final assessment.' },
     },
   },
-  // `JsonSchema`, the VC 2.0 context's own type. The Open Badges one,
-  // 1EdTechJsonSchemaValidator2019, signs but then fails the signature check
-  // ("Safe mode validation error") under the VC 2.0 context.
-  ...(SCHEMA_URL && { credentialSchema: [{ id: SCHEMA_URL, type: 'JsonSchema' }] }),
   ...overrides.credential,
 });
 
@@ -206,8 +194,8 @@ const main = async () => {
   // required — the same omission in Nate Otto's 22 September screenshot.
   // Nothing here is fraudulent: the signature is real, the dates are fine,
   // and verifier-core still reports the credential as verified, because the
-  // schema result is filed under `additionalInformation` and never reaches
-  // `verified`. It is the issuer's mistake and only the issuer's to fix.
+  // schema check is not fatal and never reaches `verified`. It is the
+  // issuer's mistake and only the issuer's to fix.
   await write(
     'malformed',
     await sign(

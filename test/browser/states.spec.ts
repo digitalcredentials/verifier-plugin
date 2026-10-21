@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
 import { CHECK, PROBLEM } from '../../src/types.js';
-import { card, preparePages, purl, settle } from './support.js';
+import { card, preparePages, settle } from './support.js';
 
 /**
  * Drives the real component against really-signed credentials, in a real
@@ -59,8 +59,8 @@ test('an altered credential is an error and asks for a fresh copy', async ({ pag
 /**
  * The one state verifier-core itself calls a pass. Its schema result never
  * reaches `verified`, so this whole case is invisible to anything reading the
- * log alone — and it only shows up here because the schema was really
- * fetched and really validated against.
+ * log alone — and it only shows up here because the credential was really
+ * validated against the Open Badges schema bundled with the library.
  */
 test('a credential built wrong is a warning, and asks nothing of the holder', async ({ page }) => {
   const c = await pick(page, 'Built wrong');
@@ -741,20 +741,9 @@ test.describe('a withdrawal list on another site', () => {
 
   const OTHER_SITE = 'http://127.0.0.1:5182';
 
-  // Any active Playwright route stops Chromium refusing preflighted requests
-  // across sites, so the schema route (in support.ts) has to go. These
-  // credentials name the other site's copy of the schema instead, and
-  // listening (unlike routing) leaves the browser's rules alone.
-  // Unrouted, nothing stops a schema fetch from reaching purl, so here even
-  // that one counts: these credentials name the other site's copy.
-  test.beforeEach(async ({ page }) => {
-    await page.unroute('https://purl.imsglobal.org/**');
-    purl.length = 0;
-  });
-
-  test.afterEach(() => {
-    expect(purl, 'requests to purl.imsglobal.org').toEqual([]);
-  });
+  // No routes here: any active Playwright route stops Chromium refusing
+  // preflighted requests across sites (checked 1 October 2026), which would
+  // hide exactly the failure these tests exist to catch.
 
   /** Gives the card a credential from the other site; returns the library's seal and status checks. */
   const fromOtherSite = async (page: Page, file: string) => {
@@ -790,7 +779,7 @@ test.describe('a withdrawal list on another site', () => {
         });
         const credential = await (await fetch(url)).json();
         // Both in one go: set apart, the registries alone would re-check the
-        // demo's own credential, which fetches the schema from purl.
+        // demo's own credential first.
         el.registries = [
           { name: 'Local Dev Registry', type: 'dcc-legacy', url: new URL('./fixtures/registry.json', location.href).href },
         ];
