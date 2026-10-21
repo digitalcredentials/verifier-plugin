@@ -137,9 +137,10 @@ From the standup on 21 September 2026:
   separated, and `skipped`-with-a-reason and a per-check `fatal` flag as
   first-class, both of which had been hand-built here.
 
-  2.x is not on npm yet, so `package.json` pins a commit on
-  digitalcredentials/verifier-core `main`, d217b04 (#22). It is bundled into
-  `dist/`, so a host app never installs it.
+  Since 21 October 2026 `package.json` pins the published
+  `2.0.0-beta.1`, built from digitalcredentials/verifier-core `main`
+  e86bb79; before, 2.x was not on npm and it pinned a commit (d217b04,
+  #22). It is bundled into `dist/`, so a host app never installs it.
 - **veri-good is a reference, not a foundation.** It was an experiment, it
   targets a different setting (an issuer's own web page), and nobody uses it.
   Worth learning from, not worth inheriting.
@@ -163,9 +164,10 @@ tested.** It was a 1.x problem. 2.x fetches with a bare `fetch(url)`, so
 nothing is preflighted, and a page on localhost reads the withdrawal lists on
 GitHub Pages correctly. The browser tests cover it against a second local
 server that refuses preflights the way GitHub Pages does
-(`test/browser/pages-like-server.js`). Separately, the tests now serve a copy
+(`test/browser/pages-like-server.js`). Separately, the tests served a copy
 of the Open Badges schema instead of fetching it, after one request took 52
-seconds. The rest of this section is the 21 September record of 1.x, kept as
+seconds; since 2.0.0-beta.1 the library bundles the schemas and fetches
+none, and the copy is gone. The rest of this section is the 21 September record of 1.x, kept as
 it was: it no longer describes how things stand.
 
 **One real problem: fetching a status list fails in the browser.** The request
@@ -248,8 +250,8 @@ A first slice: a real credential in, real verification, one card out.
 | `src/jsx.ts` | Tells a React host's JSX about `<verifier-credential>`; types only |
 | `test/outcomes.test.ts` | The mapping, and the ways a good credential can be made to look bad |
 | `test/fixtures.test.ts` | The demo's credentials are well-formed Open Badges, apart from the one built wrong on purpose |
-| `test/did-web-outages.test.ts` | An issuer's website that won't serve its key reads as unreachable, not tampered (stopgap for verifier-core#65) |
-| `test/consistency.test.ts` | 1,500 combinations asserting the headline and the breakdown can never disagree |
+| `test/did-web-outages.test.ts` | An issuer's website that won't serve its key reads as unreachable, not tampered (verifier-core#65, fixed in 2.0.0-beta.1) |
+| `test/consistency.test.ts` | 38,880 combinations asserting the headline and the breakdown can never disagree |
 | `test/browser/states.spec.ts` | Drives the component in a real browser, locally or against a published copy |
 | `test/browser/link.spec.ts` | The demo page opened from a link to a credential |
 | `test/browser/support.ts` | Page setup both browser specs share |

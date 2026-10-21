@@ -536,6 +536,12 @@ stays green, and the reassurance can be said. Only the Dates row reports a
 problem. (Established from the library's code, 30 September 2026, and pinned by
 a test that alters an expired credential and checks it reads as tampered.)
 
+*Update, 21 October 2026:* verifier-core 2.0.0-beta.1 checks the dates in a
+check of their own, which runs only once the seal has verified, so an expired
+credential no longer fails the signature at all. The rows read as above. And
+expiry no longer stops the checks after it, so an expired credential now also
+reports whether it was deactivated and who issued it.
+
 **The name at the top follows the same rule.** When the seal didn't hold —
 an altered credential, or one with no seal at all — the issuer's name in the
 card's header carries "(unconfirmed)", as it already does for an issuer no
