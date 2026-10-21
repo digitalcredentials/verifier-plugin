@@ -192,7 +192,7 @@ type Sch = 'valid' | 'invalid' | 'no_schema' | 'unavailable' | 'missing' | 'halt
  * stops after a failed signature, so after it none of these run. Expiry and
  * a withdrawal are fatal too, but don't stop anything.
  */
-const NOT_RUN = 'Not run: cryptographic.proof.signature failed';
+const NOT_RUN = 'Not run: proof.signature failed';
 
 const SIGNATURES: Sig[] = ['passed', 'tampered', 'key_mismatch', 'unattributable', 'missing'];
 const VALIDITIES: Val[] = ['in_date', 'expired', 'not_yet_valid', 'halted', 'missing'];
@@ -689,6 +689,15 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
       const expected = reasons.find(([said]) => said.test(out.detail))?.[1];
       expect(expected, `${where}: a reason this rule doesn't know: "${out.detail}"`).toBeDefined();
       expect(row(CHECK.status)?.value, `${where}: the verdict and the Status row give different reasons`).toBe(expected);
+    }
+
+    // Dates the seal vouched for but nobody checked can't sit under a verdict
+    // that settles everything else: not "Verified", and not one about who
+    // issued it. Both rows read "unchecked" there, so severities can't see it.
+    if (row(CHECK.signature)?.severity === 'success' && row(DATES_ROW)?.severity === 'unchecked') {
+      expect(['verified', 'issuer_unconfirmed', 'registry_unreachable'], `${where}: the dates went unchecked`).not.toContain(
+        out.code,
+      );
     }
 
     if (CLAIMS_UNCHANGED.test(claims)) {

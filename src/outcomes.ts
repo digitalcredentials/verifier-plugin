@@ -192,8 +192,9 @@ const failed = (check: CheckResult | undefined): boolean =>
  * are fatal too, but since 2.0.0-beta.1 they don't halt: everything after
  * them still reports.
  *
- * Read off the skip reason, "Not run: <check id> failed": the library marks a
- * halted check no other way. Getting it wrong costs only which of two "not
+ * Read off the skip reason, "Not run: proof.signature failed" — the halting
+ * check's id within its suite, not the full one: the library marks a halted
+ * check no other way. Getting it wrong costs only which of two "not
  * checked" wordings a row uses.
  */
 const halted = (check: CheckResult | undefined): boolean =>
@@ -967,6 +968,16 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
     return code ? { code, ...FATAL[code]! } : { code: 'signature_unchecked', ...UNCHECKED_SIGNATURE };
   }
 
+  // The seal held, so the dates check ran — unless something stopped it, or it
+  // failed without naming a date (a check that throws reports CHECK_ERROR).
+  // Then we don't know whether this is in force, which is as much of an
+  // unknown as the withdrawal list, and outranks who issued it: "Genuine, but
+  // we can't confirm who issued it" would say nothing of the dates the Dates
+  // row reports unchecked.
+  if (sealHeld(checks) && !passed(checks.get(CHECK.validityPeriod))) {
+    return { code: 'dates_unchecked', severity: 'unchecked', ...COULD_NOT_CHECK };
+  }
+
   const revocationError = withdrawalUnavailable(revocation);
   if (hasStatusList(r) && !notWithdrawn(checks)) {
     if (listNotIssuers(checks)) {
@@ -1071,13 +1082,6 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
   // shows it as "not checked"; the headline must not say otherwise.
   if (!passed(signature)) {
     return { code: 'signature_unchecked', ...UNCHECKED_SIGNATURE };
-  }
-
-  // The dates have their own check since 2.0.0-beta.1, which runs whenever
-  // the signature passes. Absent anyway, "Verified" would sit above a Dates
-  // row reading "not checked".
-  if (!passed(checks.get(CHECK.validityPeriod))) {
-    return { code: 'dates_unchecked', severity: 'unchecked', ...COULD_NOT_CHECK };
   }
 
   return {

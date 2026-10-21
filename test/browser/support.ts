@@ -28,8 +28,9 @@ export const card = (page: Page) =>
  * Until 2.0.0-beta.1 verifier-core fetched a schema from there on every
  * verification, uncached; on 1 October 2026 one fetch took 52s and timed out
  * 11 tests, and the tests served a copy. It now validates against schemas
- * bundled with it, so any request there fails the test: a new dependency on
- * that host shows up straight away rather than as a slow run.
+ * bundled with it, so any request there fails the test, and is refused
+ * rather than left to the network: a new dependency on that host shows up
+ * straight away rather than as a slow run.
  */
 export const purl: string[] = [];
 
@@ -44,6 +45,7 @@ export const preparePages = () => {
     page.on('request', (r) => {
       if (new URL(r.url()).hostname === 'purl.imsglobal.org') purl.push(r.url());
     });
+    await page.route('https://purl.imsglobal.org/**', (route) => route.abort('blockedbyclient'));
     await page.addInitScript(() => {
       window.__done = 0;
       document.addEventListener('verification-complete', (e) => {

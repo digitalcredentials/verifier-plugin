@@ -59,8 +59,8 @@ export interface VerifyOptions {
  * reachable from the library or the published demo site, whose builds replace
  * `import.meta.env.DEV` with `false` and drop this along with it.
  *
- * But the dev page and the browser tests serve their registry, withdrawal list
- * and schema from localhost, so under the dev server they need a fetcher that
+ * But the dev page and the browser tests serve their registry and withdrawal
+ * list from localhost, so under the dev server they need a fetcher that
  * will go there. It is a bare `fetch(url)`, like the built-in one: no headers,
  * so no CORS preflight, which is what lets a withdrawal list on another site
  * load at all (see below). It returns parsed JSON when the body is JSON and the

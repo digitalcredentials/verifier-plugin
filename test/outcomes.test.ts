@@ -1794,6 +1794,51 @@ describe('an expired credential, now that expiry stops nothing after it', () => 
   });
 });
 
+describe('dates nobody checked, though the seal held', () => {
+  // A check that throws comes back as a failure carrying CHECK_ERROR, with no
+  // date named; a run limited to some phases leaves no row at all.
+  const datesThrew = (): CheckResult =>
+    fail(
+      CHECK.validityPeriod,
+      [{ type: 'https://www.w3.org/TR/vc-data-model#CHECK_ERROR', title: 'Check Error', detail: 'Check "proof.validity-period" threw: x' }],
+      true,
+    );
+
+  it.each([
+    ['the dates check threw', (r: VerificationResponse) => set(r, datesThrew())],
+    ['no dates check reported', (r: VerificationResponse) => remove(r, CHECK.validityPeriod)],
+  ])('says it could not check, when %s', (_, spoil) => {
+    const r = ok();
+    spoil(r);
+    expect(summarise(r)).toEqual({
+      code: 'dates_unchecked',
+      severity: 'unchecked',
+      headline: "We couldn't check this right now",
+      detail: "Something went wrong while we were checking, so we can't tell you yet whether it's valid.",
+      action: 'Try again in a little while.',
+    });
+    expect(row(r, CHECK.validityPeriod)).toMatchObject({ severity: 'unchecked', value: 'not checked' });
+    // The seal still held, and the Tampering row says so.
+    expect(row(r, CHECK.signature)).toMatchObject({ severity: 'success', value: 'none detected' });
+  });
+
+  it('outranks who issued it', () => {
+    // "Genuine, but we can't confirm who issued it" would settle the dates by
+    // saying nothing of them.
+    const r = ok();
+    set(r, datesThrew());
+    set(r, notRegistered());
+    expect(summarise(r).code).toBe('dates_unchecked');
+  });
+
+  it('yields to a withdrawal, which the issuer has already decided', () => {
+    const r = ok();
+    set(r, datesThrew());
+    set(r, revokedBy(PROBLEM.revoked, 'Credential Revoked'));
+    expect(summarise(r).code).toBe('withdrawn');
+  });
+});
+
 describe('findings from the review of the verifier-core main adaptation', () => {
   const NOT_RUN = (id: string) => `Not run: ${id} failed`;
 

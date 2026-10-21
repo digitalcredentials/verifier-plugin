@@ -695,9 +695,9 @@ test.describe('lifecycle, from review', () => {
 
 /**
  * A did:web issuer publishes its signing key in a did.json on its own website.
- * When that won't load, verifier-core calls the signature invalid
- * (verifier-core#65), and verify.ts's namingDidWebOutages turns it back into
- * "couldn't reach". The credential is vc-test-fixtures' badDidWeb.json (see
+ * When that won't load, verifier-core reports DID_WEB_UNRESOLVED, which reads
+ * "couldn't reach" (verifier-core#65, fixed in 2.0.0-beta.1; until then it
+ * called the signature invalid, and verify.ts carried a stopgap). The credential is vc-test-fixtures' badDidWeb.json (see
  * test/did-web-outages.test.ts). Its issuer's did.json is answered here, so
  * nothing reaches the real site. Against a published copy, this exercises
  * the built-in fetcher that builds use.
@@ -743,7 +743,11 @@ test.describe('a withdrawal list on another site', () => {
 
   // No routes here: any active Playwright route stops Chromium refusing
   // preflighted requests across sites (checked 1 October 2026), which would
-  // hide exactly the failure these tests exist to catch.
+  // hide exactly the failure these tests exist to catch. So support.ts's
+  // refusal of purl goes; its watch, which only listens, stays.
+  test.beforeEach(async ({ page }) => {
+    await page.unroute('https://purl.imsglobal.org/**');
+  });
 
   /** Gives the card a credential from the other site; returns the library's seal and status checks. */
   const fromOtherSite = async (page: Page, file: string) => {
