@@ -108,6 +108,36 @@ describe('what a person is told, end to end', () => {
   });
 });
 
+/**
+ * A credential can carry several seals, a proof set. Since 2.0.0-beta.1
+ * (verifier-core#67) each is checked and all must hold: before, one good
+ * seal beside a broken one read as verified. A broken one reads as
+ * tampering, whichever position it is in.
+ */
+describe('a credential with several seals', () => {
+  const sealed = fixture('verified');
+  const seal = sealed['proof'] as Record<string, unknown>;
+  const value = seal['proofValue'] as string;
+  // One character changed near the end, so the seal still parses but no longer matches.
+  const broken = { ...seal, proofValue: `${value.slice(0, -2)}${value.at(-2) === 'A' ? 'B' : 'A'}${value.at(-1)}` };
+
+  it.each([
+    ['second', [seal, broken]],
+    ['first', [broken, seal]],
+  ])('reads as tampered when the %s of two is broken', async (_, proof) => {
+    const r = await verify({ ...sealed, proof });
+    expect(problemTypes(r, CHECK.signature)).toEqual([PROBLEM.invalidSignature]);
+    expect(summarise(r).code).toBe('invalid_signature');
+    expect(listChecks(r).find((c) => c.id === CHECK.signature)?.value).toBe('detected');
+  });
+
+  it('holds when both seals do', async () => {
+    const r = await verify({ ...sealed, proof: [seal, { ...seal }] });
+    expect(status(r, CHECK.signature)).toBe('success');
+    expect(listChecks(r).find((c) => c.id === CHECK.signature)?.value).toBe('none detected');
+  });
+});
+
 describe('a credential the library rejects for its shape', () => {
   it('stops at the structure check, and says so rather than blaming us', async () => {
     const c = fixture('withdrawn');
