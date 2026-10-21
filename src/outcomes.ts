@@ -334,8 +334,10 @@ const believedChecks = (r: VerificationResponse, options: OutcomeOptions): Map<s
  * Nor does any list behind a seal that didn't hold: which entry of it is this
  * credential's is the credential's own claim, so the answer is too. The
  * library halts after a failed seal, but the rule must not depend on that,
- * as for the dates. The same goes for isSuspended. notWithdrawn needs no
- * guard: everything that reads it already stands behind a seal that held.
+ * as for the dates. The same goes for the two below. notWithdrawn's guard
+ * is one no test can catch today, since everything that reads it already
+ * stands behind a held seal; it is there because "the issuer hasn't
+ * deactivated it" is the claim that must never leak past a broken seal.
  */
 const isWithdrawn = (checks: Map<string, CheckResult>): boolean =>
   sealHeld(checks) && hasProblem(checks.get(CHECK.status), PROBLEM.revoked) && !listNotIssuers(checks);
@@ -354,7 +356,7 @@ const isSuspended = (checks: Map<string, CheckResult>): boolean =>
  * this. The only grounds for saying the issuer hasn't withdrawn it.
  */
 const notWithdrawn = (checks: Map<string, CheckResult>): boolean =>
-  passed(checks.get(CHECK.status)) && !listNotIssuers(checks);
+  sealHeld(checks) && passed(checks.get(CHECK.status)) && !listNotIssuers(checks);
 
 /** The withdrawal check ran, failed, and established nothing either way. */
 const withdrawalUnavailable = (check: CheckResult | undefined): boolean =>

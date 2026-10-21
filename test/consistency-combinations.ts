@@ -779,6 +779,7 @@ export const agreementTests = (file: string): void => {
       if (row(CHECK.signature)?.severity !== 'success') {
         expect(row(DATES_ROW)?.value, `${where}: the Dates row behind an unheld seal`).toBe('not checked');
         expect(row(CHECK.status)?.value, `${where}: the Status row behind an unheld seal`).toBe('not checked');
+        expect(row(CHECK.status)?.severity, `${where}: the Status row behind an unheld seal`).toBe('unchecked');
       }
 
       // Only the library says a credential has run out. An end date in the
