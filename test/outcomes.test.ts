@@ -1284,6 +1284,27 @@ describe('findings from the review of the 2.x migration', () => {
     );
     expect(summarise(r).code).not.toBe('expired');
     expect(summarise(r).headline).not.toMatch(/expired/i);
+    expect(listChecks(r).find((c) => c.id === CHECK.validityPeriod)).toMatchObject({
+      severity: 'unchecked',
+      value: 'not checked',
+    });
+  });
+
+  it.each([
+    ['a start date to come', PROBLEM.credentialNotYetValid, 'not_yet_valid'],
+    ['no date problem at all', undefined, 'verified'],
+  ])('does not assert %s behind a seal nobody checked', (_, type, code) => {
+    // No signature step at all, and dates the library says are wrong or fine:
+    // either way they are the credential's own claim.
+    const r = ok();
+    remove(r, CHECK.signature);
+    if (type) set(r, fail(CHECK.validityPeriod, [{ type, title: 't', detail: 'd' }], true));
+    expect(summarise(r).code).not.toBe(code);
+    expect(summarise(r).code).toBe('signature_unchecked');
+    expect(listChecks(r).find((c) => c.id === CHECK.validityPeriod)).toMatchObject({
+      severity: 'unchecked',
+      value: 'not checked',
+    });
     expect(listChecks(r).find((c) => c.id === CHECK.validityPeriod)?.severity).toBe(
       'unchecked',
     );
@@ -1839,6 +1860,13 @@ describe('dates nobody checked, though the seal held', () => {
     set(r, datesThrew());
     set(r, notRegistered());
     expect(summarise(r).code).toBe('dates_unchecked');
+  });
+
+  it('yields to a withdrawal check that could not finish, which names what we could not check', () => {
+    const r = ok();
+    set(r, datesThrew());
+    set(r, skip(CHECK.status, 'Status type "StatusList2021Entry" is not BitstringStatusListEntry.'));
+    expect(summarise(r).code).toBe('withdrawal_unknown');
   });
 
   it('yields to a withdrawal list we could not rely on, whose words say whose it is to fix', () => {

@@ -726,12 +726,21 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
       expect(row(CHECK.signature)?.severity, `${where}: a date reported without the seal`).toBe('success');
     }
 
+    // ...and the Dates row says the same: no date at all, "in date"
+    // included, behind a seal that didn't hold.
+    if (row(CHECK.signature)?.severity !== 'success') {
+      expect(row(DATES_ROW)?.value, `${where}: the Dates row behind an unheld seal`).toBe('not checked');
+    }
+
     // Only the library says a credential has run out. An end date in the
     // past that it didn't report must not become an "Expired" headline: our
     // clock second-guessing its own is what this rules out.
     if (val !== 'expired') {
       expect(out.code, `${where}: an expiry the library didn't report`).not.toBe('expired');
-      expect(`${out.headline} ${out.detail}`, `${where}: an expiry the library didn't report`).not.toMatch(/expired/i);
+    }
+    // And no verdict but "Expired" talks of expiry, whatever was reported.
+    if (out.code !== 'expired') {
+      expect(`${out.headline} ${out.detail}`, `${where}: talks of expiry under ${out.code}`).not.toMatch(/expired/i);
     }
 
     if (CLAIMS_UNCHANGED.test(claims)) {

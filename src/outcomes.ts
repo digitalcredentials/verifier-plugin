@@ -889,8 +889,8 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
       severity: 'warning',
       code: 'expired',
       headline: on ? `Expired on ${on}` : 'This has passed its end date',
-      // Only what reported: the seal held (the library checks dates only after
-      // it), so this normally says it hasn't been tampered with. It is assembled
+      // Only what reported: the seal held (isExpired requires it), so this
+      // always says it hasn't been tampered with. It is assembled
       // rather than written out so that it appears when the checks behind it
       // did pass, and stays absent when they did not. Nothing fills the gap
       // otherwise: "Its dates have run out" only restated the headline.
@@ -1013,9 +1013,9 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
 
   // The seal held, so the dates check ran — unless something stopped it, or it
   // failed without naming a date (a check that throws reports CHECK_ERROR).
-  // Then we don't know whether this is in force. Below the withdrawal list,
-  // whose words are more specific and can say whose it is to fix; above who
-  // issued it, since "Genuine, but we can't confirm who issued it" would say
+  // Then we don't know whether this is in force. Below the withdrawal list's
+  // unknowns, which name what we couldn't check and, for a list someone else
+  // signed, whose it is to fix; above who issued it, since "Genuine, but we can't confirm who issued it" would say
   // nothing of the dates the Dates row reports unchecked.
   if (!passed(checks.get(CHECK.validityPeriod))) {
     return { code: 'dates_unchecked', severity: 'unchecked', ...COULD_NOT_CHECK };
@@ -1215,9 +1215,10 @@ export const listChecks = (r: VerificationResponse, options: OutcomeOptions = {}
   }
 
   // Read off the same check as the verdict, which is what keeps the two from
-  // disagreeing. It runs only after the signature passed, so after a seal
-  // that failed it reads "not checked".
-  const dates = checks.get(CHECK.validityPeriod);
+  // disagreeing. It runs only after the signature passed, and is believed only
+  // then: behind a seal that failed the dates are the credential's own claim,
+  // so the row reads "not checked", "in date" included.
+  const dates = sealHeld(checks) ? checks.get(CHECK.validityPeriod) : undefined;
   const expiredNow = isExpired(checks);
   const notYet = !expiredNow && isNotYetValid(checks);
   const end = expiryDate(r);
