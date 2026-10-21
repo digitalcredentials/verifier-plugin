@@ -1926,10 +1926,12 @@ describe('the Status row behind a seal that did not hold', () => {
     ['says deactivated', () => revokedBy(PROBLEM.revoked, 'Credential Revoked')],
     ['says on hold', () => revokedBy(PROBLEM.suspended, 'Credential Suspended')],
   ])('reads "not checked" when the seal is tampered and the list %s', (_, status) => {
+    // The row's own guard, whatever the list said. The guards on believing a
+    // withdrawal or a hold are pinned by "believes no withdrawal when the
+    // seal never reported" and by the consistency suite.
     const r = ok();
     set(r, tamperedSignature());
     set(r, status());
-    expect(summarise(r).code).toBe('invalid_signature');
     expect(row(r, CHECK.status)).toMatchObject({ severity: 'unchecked', value: 'not checked' });
   });
 });
