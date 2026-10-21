@@ -890,10 +890,9 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
       code: 'expired',
       headline: on ? `Expired on ${on}` : 'This has passed its end date',
       // Only what reported: the seal held (isExpired requires it), so this
-      // always says it hasn't been tampered with. It is assembled
-      // rather than written out so that it appears when the checks behind it
-      // did pass, and stays absent when they did not. Nothing fills the gap
-      // otherwise: "Its dates have run out" only restated the headline.
+      // always says it hasn't been tampered with, and adds that the issuer
+      // hasn't deactivated it only when the withdrawal list came back clear.
+      // "Its dates have run out" only restated the headline.
       detail: reassurance(r, checks).trim(),
       action: `Ask ${named ?? 'the issuer'} whether it can be renewed.`,
     };
@@ -1015,8 +1014,9 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
   // failed without naming a date (a check that throws reports CHECK_ERROR).
   // Then we don't know whether this is in force. Below the withdrawal list's
   // unknowns, which name what we couldn't check and, for a list someone else
-  // signed, whose it is to fix; above who issued it, since "Genuine, but we can't confirm who issued it" would say
-  // nothing of the dates the Dates row reports unchecked.
+  // signed, whose it is to fix; above who issued it, since "Genuine, but we
+  // can't confirm who issued it" would say nothing of the dates the Dates row
+  // reports unchecked.
   if (!passed(checks.get(CHECK.validityPeriod))) {
     return { code: 'dates_unchecked', severity: 'unchecked', ...COULD_NOT_CHECK };
   }

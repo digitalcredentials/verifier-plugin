@@ -740,7 +740,9 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
     }
     // And no verdict but "Expired" talks of expiry, whatever was reported.
     if (out.code !== 'expired') {
-      expect(`${out.headline} ${out.detail}`, `${where}: talks of expiry under ${out.code}`).not.toMatch(/expired/i);
+      expect(`${out.headline} ${out.detail} ${out.action ?? ''}`, `${where}: talks of expiry under ${out.code}`).not.toMatch(
+        /expir|run out|end date|renew/i,
+      );
     }
 
     if (CLAIMS_UNCHANGED.test(claims)) {

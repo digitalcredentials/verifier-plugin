@@ -1305,9 +1305,6 @@ describe('findings from the review of the 2.x migration', () => {
       severity: 'unchecked',
       value: 'not checked',
     });
-    expect(listChecks(r).find((c) => c.id === CHECK.validityPeriod)?.severity).toBe(
-      'unchecked',
-    );
   });
 
   it('separates a malformed credential from one whose vocabulary cannot be read', () => {
