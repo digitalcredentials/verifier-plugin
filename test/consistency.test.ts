@@ -151,7 +151,7 @@ type Sig = 'passed' | 'tampered' | 'key_mismatch' | 'unattributable' | 'missing'
  * dimension of its own too, because the headline names it and must not
  * invent an expiry the library didn't report.
  */
-type Val = 'in_date' | 'expired' | 'not_yet_valid' | 'halted' | 'missing';
+type Val = 'in_date' | 'expired' | 'not_yet_valid' | 'errored' | 'halted' | 'missing';
 /**
  * `unreadable`: a status type the library does not recognise, so it skips.
  * `+other`: the list loaded and was read, but the issuer didn't sign it — the
@@ -195,7 +195,7 @@ type Sch = 'valid' | 'invalid' | 'no_schema' | 'unavailable' | 'missing' | 'halt
 const NOT_RUN = 'Not run: proof.signature failed';
 
 const SIGNATURES: Sig[] = ['passed', 'tampered', 'key_mismatch', 'unattributable', 'missing'];
-const VALIDITIES: Val[] = ['in_date', 'expired', 'not_yet_valid', 'halted', 'missing'];
+const VALIDITIES: Val[] = ['in_date', 'expired', 'not_yet_valid', 'errored', 'halted', 'missing'];
 const REVOCATIONS: Rev[] = [
   'passed',
   'revoked',
@@ -287,6 +287,22 @@ const validityCheck = (val: Val): CheckResult | undefined => {
       return undefined;
     case 'halted':
       return check(CHECK.validityPeriod, { status: 'skipped', reason: NOT_RUN }, true);
+    // A check that throws comes back as a failure naming no date.
+    case 'errored':
+      return check(
+        CHECK.validityPeriod,
+        {
+          status: 'failure',
+          problems: [
+            {
+              type: 'https://www.w3.org/TR/vc-data-model#CHECK_ERROR',
+              title: 'Check Error',
+              detail: 'Check "proof.validity-period" threw: x',
+            },
+          ],
+        },
+        true,
+      );
     case 'in_date':
       return check(
         CHECK.validityPeriod,
@@ -691,13 +707,31 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
       expect(row(CHECK.status)?.value, `${where}: the verdict and the Status row give different reasons`).toBe(expected);
     }
 
-    // Dates the seal vouched for but nobody checked can't sit under a verdict
-    // that settles everything else: not "Verified", and not one about who
-    // issued it. Both rows read "unchecked" there, so severities can't see it.
+    // Dates the seal vouched for but nobody checked leave only verdicts that
+    // outrank them: a finding, or an unknown about the withdrawal list. Not
+    // "Verified", and not one about who issued it. Both rows read "unchecked"
+    // there, so severities can't see it. Listed by what is allowed, so a new
+    // or reordered verdict fails here rather than slipping past.
     if (row(CHECK.signature)?.severity === 'success' && row(DATES_ROW)?.severity === 'unchecked') {
-      expect(['verified', 'issuer_unconfirmed', 'registry_unreachable'], `${where}: the dates went unchecked`).not.toContain(
-        out.code,
-      );
+      expect(
+        ['dates_unchecked', 'withdrawn', 'suspended', 'malformed', 'withdrawal_unknown'],
+        `${where}: the dates went unchecked`,
+      ).toContain(out.code);
+    }
+
+    // A date is a finding only behind a seal that held: otherwise it is the
+    // credential's own claim. The library halts after a failed seal, but the
+    // rule must not depend on that.
+    if (out.code === 'expired' || out.code === 'not_yet_valid') {
+      expect(row(CHECK.signature)?.severity, `${where}: a date reported without the seal`).toBe('success');
+    }
+
+    // Only the library says a credential has run out. An end date in the
+    // past that it didn't report must not become an "Expired" headline: our
+    // clock second-guessing its own is what this rules out.
+    if (val !== 'expired') {
+      expect(out.code, `${where}: an expiry the library didn't report`).not.toBe('expired');
+      expect(`${out.headline} ${out.detail}`, `${where}: an expiry the library didn't report`).not.toMatch(/expired/i);
     }
 
     if (CLAIMS_UNCHANGED.test(claims)) {

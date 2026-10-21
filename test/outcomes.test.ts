@@ -1272,8 +1272,18 @@ describe('findings from the review of the 2.x migration', () => {
         true,
       ),
     );
-    set(r, skip(CHECK.validityPeriod, 'Not run: proof.signature failed'));
+    // Reported expired all the same: the library halts after a failed seal,
+    // but the rule must not depend on that staying true.
+    set(
+      r,
+      fail(
+        CHECK.validityPeriod,
+        [{ type: PROBLEM.credentialExpired, title: 'Credential Expired', detail: 'after "validUntil"' }],
+        true,
+      ),
+    );
     expect(summarise(r).code).not.toBe('expired');
+    expect(summarise(r).headline).not.toMatch(/expired/i);
     expect(listChecks(r).find((c) => c.id === CHECK.validityPeriod)?.severity).toBe(
       'unchecked',
     );
@@ -1829,6 +1839,14 @@ describe('dates nobody checked, though the seal held', () => {
     set(r, datesThrew());
     set(r, notRegistered());
     expect(summarise(r).code).toBe('dates_unchecked');
+  });
+
+  it('yields to a withdrawal list we could not rely on, whose words say whose it is to fix', () => {
+    const r = ok();
+    set(r, datesThrew());
+    add(r, listSignedByAnother());
+    expect(summarise(r).code).toBe('withdrawal_unknown');
+    expect(summarise(r).action).toContain('know');
   });
 
   it('yields to a withdrawal, which the issuer has already decided', () => {

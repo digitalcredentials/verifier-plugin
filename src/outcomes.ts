@@ -760,11 +760,17 @@ const reassurance = (
  * credential's own end date and the library's prose to tell them apart. Now
  * the library judges the dates against its own clock and says which, and our
  * clock second-guessing it could only produce a headline it disagrees with.
+ *
+ * Only while the seal held. The library checks the dates only after it, but
+ * the rule must not depend on that staying true: without the seal the dates
+ * are the credential's own claim, and "Expired on …" would state as fact
+ * something nothing vouched for. Until 2.0.0-beta.1 this came free, since the
+ * dates were judged inside the signature check.
  */
 const isExpired = (checks: Map<string, CheckResult>): boolean =>
-  hasProblem(checks.get(CHECK.validityPeriod), PROBLEM.credentialExpired);
+  sealHeld(checks) && hasProblem(checks.get(CHECK.validityPeriod), PROBLEM.credentialExpired);
 const isNotYetValid = (checks: Map<string, CheckResult>): boolean =>
-  hasProblem(checks.get(CHECK.validityPeriod), PROBLEM.credentialNotYetValid);
+  sealHeld(checks) && hasProblem(checks.get(CHECK.validityPeriod), PROBLEM.credentialNotYetValid);
 
 /** The end date, written out, or nothing if there isn't a readable one. */
 const expiryDate = (r: VerificationResponse): string | undefined =>
@@ -958,24 +964,15 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
   //
   // An unchecked seal outranks all of these: it is the more serious unknown,
   // and verifier-core halts the withdrawal check after it, so "the withdrawal
-  // check never ran" would be true but beside the point.
-  if (!passed(signature) && !sealHeld(checks)) {
+  // check never ran" would be true but beside the point. Everything below
+  // this has a seal that held.
+  if (!sealHeld(checks)) {
     const code = hasProblem(signature, PROBLEM.didWebUnresolved)
       ? 'did_web_unresolved'
       : hasProblem(signature, PROBLEM.httpError)
         ? 'http_error_with_signature_check'
         : undefined;
     return code ? { code, ...FATAL[code]! } : { code: 'signature_unchecked', ...UNCHECKED_SIGNATURE };
-  }
-
-  // The seal held, so the dates check ran — unless something stopped it, or it
-  // failed without naming a date (a check that throws reports CHECK_ERROR).
-  // Then we don't know whether this is in force, which is as much of an
-  // unknown as the withdrawal list, and outranks who issued it: "Genuine, but
-  // we can't confirm who issued it" would say nothing of the dates the Dates
-  // row reports unchecked.
-  if (sealHeld(checks) && !passed(checks.get(CHECK.validityPeriod))) {
-    return { code: 'dates_unchecked', severity: 'unchecked', ...COULD_NOT_CHECK };
   }
 
   const revocationError = withdrawalUnavailable(revocation);
@@ -1014,6 +1011,16 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
     };
   }
 
+  // The seal held, so the dates check ran — unless something stopped it, or it
+  // failed without naming a date (a check that throws reports CHECK_ERROR).
+  // Then we don't know whether this is in force. Below the withdrawal list,
+  // whose words are more specific and can say whose it is to fix; above who
+  // issued it, since "Genuine, but we can't confirm who issued it" would say
+  // nothing of the dates the Dates row reports unchecked.
+  if (!passed(checks.get(CHECK.validityPeriod))) {
+    return { code: 'dates_unchecked', severity: 'unchecked', ...COULD_NOT_CHECK };
+  }
+
   // An unreachable registry only leaves us in doubt if nothing else answered.
   // A match and an unreachable registry are not mutually exclusive: with more
   // than one registry the check passes and still reports the one it could not
@@ -1024,11 +1031,9 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
   // through to `issuer_unconfirmed` stated a negative we never tested —
   // "they aren't on our list of known issuers" — which is the §5 mistake.
   //
-  // Only while the seal held. Without it the issuer row says the seal is
-  // the problem, not the list, and so must the headline: the seal is the
-  // more serious unknown, and it falls through to `signature_unchecked`.
+  // Only while the seal held, which it has by here. Without it the issuer row
+  // says the seal is the problem, not the list, and so does the headline.
   if (
-    sealHeld(checks) &&
     (issuer.registriesUnreachable || issuer.source === 'unknown') &&
     !passed(checks.get(CHECK.registeredIssuer))
   ) {
@@ -1052,13 +1057,12 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
     };
   }
 
-  // `passed(signature)` is a condition of this outcome, not an afterthought:
+  // A passed signature is a condition of this outcome, not an afterthought:
   // its first word is "Genuine", and the sentence under it says nothing has
   // changed since issue. Neither is ours to say until the signature check has
-  // reported. Without it we fall through to `signature_unchecked` below,
-  // which is the more serious unknown and should lead anyway — §5 is explicit
+  // reported, which is why the unchecked seal returned above. §5 is explicit
   // that an unlisted issuer is common and means nothing is wrong.
-  if (!passed(checks.get(CHECK.registeredIssuer)) && passed(signature)) {
+  if (!passed(checks.get(CHECK.registeredIssuer))) {
     // requirements.md §5: one sentence, not two verdicts, and ⓘ rather than ⚠.
     // Nothing is wrong here. Something is unknown.
     const says =
@@ -1077,13 +1081,9 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
     };
   }
 
-  // Everything left is a pass — but only for the checks that actually
-  // reported. A step missing from the log establishes nothing, and listChecks
-  // shows it as "not checked"; the headline must not say otherwise.
-  if (!passed(signature)) {
-    return { code: 'signature_unchecked', ...UNCHECKED_SIGNATURE };
-  }
-
+  // Everything left is a pass, and only for checks that actually reported:
+  // the seal, the dates and the issuer each returned above unless they
+  // passed, and the withdrawal list unless it passed or there was none.
   return {
     severity: 'success',
     code: 'verified',
