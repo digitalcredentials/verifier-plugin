@@ -39,7 +39,7 @@ export const groupChecks = (r: VerificationResponse): CheckGroup[] => {
     let home: CheckGroup | undefined;
     for (const group of groups) {
       const id = group.suite!.id;
-      if (check.id && belongsTo(check.id, id) && (!home || id.length > home.suite!.id.length)) {
+      if (belongsTo(check.id, id) && (!home || id.length > home.suite!.id.length)) {
         home = group;
       }
     }
@@ -52,11 +52,9 @@ export const groupChecks = (r: VerificationResponse): CheckGroup[] => {
 /**
  * What to call a check inside its group: the part of its id after the suite's,
  * so `cryptographic.core.proof-exists` reads `proof-exists` under
- * `cryptographic.core`. Outside a group it keeps its whole id — or, for a
- * hand-built result with no id, the deprecated `suite` and `check` it carries.
+ * `cryptographic.core`. Outside a group it keeps its whole id.
  */
-export const checkName = (check: CheckResult, suiteId?: string): string => {
-  const id = check.id ?? [check.suite, check.check].filter(Boolean).join('.');
+export const checkName = ({ id }: CheckResult, suiteId?: string): string => {
   if (!suiteId || id === suiteId || !belongsTo(id, suiteId)) return id;
   return id.slice(suiteId.length + 1);
 };

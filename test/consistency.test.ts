@@ -141,21 +141,22 @@ describe('the claim patterns themselves', () => {
  */
 
 /**
- * The validity dates are judged inside the signature check, so the signature
- * dimension covers every way that one check can fail. Since verifier-core #58
- * and #59 each has its own problem type: tampering, expiry, a start date not
- * yet reached, and a key that isn't the issuer's. The end date stays a
- * dimension of its own, because the headline names it and must not invent an
- * expiry the library didn't report.
+ * Every way the signature check can end. Since verifier-core #59 a key that
+ * isn't the issuer's has its own problem type, apart from tampering.
  */
-type Sig = 'passed' | 'tampered' | 'expired' | 'not_yet_valid' | 'key_mismatch' | 'unattributable' | 'missing';
+type Sig = 'passed' | 'tampered' | 'key_mismatch' | 'unattributable' | 'missing';
+/**
+ * The validity period, a check of its own since 2.0.0-beta.1: before, the
+ * dates were judged inside the signature check. The end date stays a
+ * dimension of its own too, because the headline names it and must not
+ * invent an expiry the library didn't report.
+ */
+type Val = 'in_date' | 'expired' | 'not_yet_valid' | 'halted' | 'missing';
 /**
  * `unreadable`: a status type the library does not recognise, so it skips.
  * `+other`: the list loaded and was read, but the issuer didn't sign it — the
- * status check's own result is untouched, and a second check reports it.
- * verifier-core's main reports that only for a list that passed; after a mark
- * the second check is "Not run". `revoked+other` and `suspended+other` are
- * here for when it does, so the rules are ready rather than merely untested.
+ * status check's own result is untouched, and a second check reports it,
+ * after a mark as well as after a pass since 2.0.0-beta.1.
  */
 type Rev =
   | 'passed'
@@ -188,12 +189,13 @@ type Iss =
 type Sch = 'valid' | 'invalid' | 'no_schema' | 'unavailable' | 'missing' | 'halted';
 /**
  * `halted`: skipped because an earlier check failed fatally. verifier-core
- * stops after a fatal failure, and the signature check is fatal for expiry
- * too, so after it none of these run.
+ * stops after a failed signature, so after it none of these run. Expiry and
+ * a withdrawal are fatal too, but don't stop anything.
  */
-const NOT_RUN = 'Not run: proof.signature failed';
+const NOT_RUN = 'Not run: cryptographic.proof.signature failed';
 
-const SIGNATURES: Sig[] = ['passed', 'tampered', 'expired', 'not_yet_valid', 'key_mismatch', 'unattributable', 'missing'];
+const SIGNATURES: Sig[] = ['passed', 'tampered', 'key_mismatch', 'unattributable', 'missing'];
+const VALIDITIES: Val[] = ['in_date', 'expired', 'not_yet_valid', 'halted', 'missing'];
 const REVOCATIONS: Rev[] = [
   'passed',
   'revoked',
@@ -221,8 +223,6 @@ const SCHEMAS: Sch[] = ['valid', 'invalid', 'no_schema', 'unavailable', 'missing
 
 const check = (id: string, outcome: CheckResult['outcome'], fatal = false): CheckResult => ({
   id,
-  // The deprecated pair, carried so the shape matches what the library emits.
-  check: id.split('.').slice(-1)[0]!,
   suite: id.split('.').slice(1, 2)[0]!,
   outcome,
   fatal,
@@ -244,36 +244,6 @@ const signatureCheck = (sig: Sig): CheckResult | undefined => {
           status: 'failure',
           problems: [
             { type: PROBLEM.invalidSignature, title: 'Invalid Signature', detail: 'Invalid signature.' },
-          ],
-        },
-        true,
-      );
-    case 'expired':
-      return check(
-        CHECK.signature,
-        {
-          status: 'failure',
-          problems: [
-            {
-              type: PROBLEM.credentialExpired,
-              title: 'Credential Expired',
-              detail: `The current date time (2026-09-23T00:00:00Z) is after "validUntil" (${PAST}).`,
-            },
-          ],
-        },
-        true,
-      );
-    case 'not_yet_valid':
-      return check(
-        CHECK.signature,
-        {
-          status: 'failure',
-          problems: [
-            {
-              type: PROBLEM.credentialNotYetValid,
-              title: 'Credential Not Yet Valid',
-              detail: `The current date time (2026-09-23T00:00:00Z) is before "validFrom" (${FUTURE}).`,
-            },
           ],
         },
         true,
@@ -303,6 +273,51 @@ const signatureCheck = (sig: Sig): CheckResult | undefined => {
               type: PROBLEM.proofVerification,
               title: 'No Applicable Crypto Service',
               detail: 'No registered crypto service can verify this subject.',
+            },
+          ],
+        },
+        true,
+      );
+  }
+};
+
+const validityCheck = (val: Val): CheckResult | undefined => {
+  switch (val) {
+    case 'missing':
+      return undefined;
+    case 'halted':
+      return check(CHECK.validityPeriod, { status: 'skipped', reason: NOT_RUN }, true);
+    case 'in_date':
+      return check(
+        CHECK.validityPeriod,
+        { status: 'success', message: 'The credential is within its validity period.' },
+        true,
+      );
+    case 'expired':
+      return check(
+        CHECK.validityPeriod,
+        {
+          status: 'failure',
+          problems: [
+            {
+              type: PROBLEM.credentialExpired,
+              title: 'Credential Expired',
+              detail: `The current date time (2026-09-23T00:00:00Z) is after "validUntil" (${PAST}).`,
+            },
+          ],
+        },
+        true,
+      );
+    case 'not_yet_valid':
+      return check(
+        CHECK.validityPeriod,
+        {
+          status: 'failure',
+          problems: [
+            {
+              type: PROBLEM.credentialNotYetValid,
+              title: 'Credential Not Yet Valid',
+              detail: `The current date time (2026-09-23T00:00:00Z) is before "validFrom" (${FUTURE}).`,
             },
           ],
         },
@@ -370,6 +385,11 @@ const revocationCheck = (rev: Rev): CheckResult | undefined => {
 
 const registryCheck = (iss: Iss): CheckResult | undefined => {
   const unchecked = '1 registries could not be checked: Second Registry';
+  // What the lookup found, as the library also gives it: as data.
+  const payload = (matched: boolean, unreached: boolean) => ({
+    matches: matched ? [{ registry: { name: 'DCC Registry', type: 'dcc-legacy' } }] : [],
+    uncheckedRegistries: unreached ? [{ name: 'Second Registry', type: 'dcc-legacy' }] : [],
+  });
   switch (iss) {
     case 'halted':
       return check(CHECK.registeredIssuer, { status: 'skipped', reason: NOT_RUN });
@@ -382,11 +402,13 @@ const registryCheck = (iss: Iss): CheckResult | undefined => {
       return check(CHECK.registeredIssuer, {
         status: 'success',
         message: 'Issuer found in registry: DCC Registry',
+        payload: payload(true, false),
       });
     case 'matched+unreachable':
       return check(CHECK.registeredIssuer, {
         status: 'success',
         message: `Issuer found in registry: DCC Registry. ${unchecked}`,
+        payload: payload(true, true),
       });
     case 'unlisted':
       return check(CHECK.registeredIssuer, {
@@ -398,6 +420,7 @@ const registryCheck = (iss: Iss): CheckResult | undefined => {
             detail: 'Issuer did:key:z6Mkn was not found in any known DID registry.',
           },
         ],
+        payload: payload(false, false),
       });
     case 'unreachable':
       return check(CHECK.registeredIssuer, {
@@ -410,6 +433,7 @@ const registryCheck = (iss: Iss): CheckResult | undefined => {
           },
           { type: PROBLEM.registryUnchecked, title: 'Registry Unchecked', detail: unchecked },
         ],
+        payload: payload(false, true),
       });
     case 'none_reached':
       return check(CHECK.registeredIssuer, {
@@ -421,6 +445,7 @@ const registryCheck = (iss: Iss): CheckResult | undefined => {
             detail: `Issuer registration could not be determined: ${unchecked}`,
           },
         ],
+        payload: payload(false, true),
       });
     case 'errored':
       return check(CHECK.registeredIssuer, {
@@ -470,7 +495,7 @@ const schemaCheck = (sch: Sch): CheckResult | undefined => {
   }
 };
 
-const build = (sig: Sig, rev: Rev, end: End, iss: Iss, sch: Sch): VerificationResponse => {
+const build = (sig: Sig, val: Val, rev: Rev, end: End, iss: Iss, sch: Sch): VerificationResponse => {
   const results = [
     // The four core checks pass throughout: a failure among them is
     // "it stopped", which has its own describe block below.
@@ -479,6 +504,7 @@ const build = (sig: Sig, rev: Rev, end: End, iss: Iss, sch: Sch): VerificationRe
     check(CHECK.credentialId, { status: 'success', message: 'ok' }, true),
     check(CHECK.proofExists, { status: 'success', message: 'ok' }, true),
     signatureCheck(sig),
+    validityCheck(val),
     revocationCheck(rev),
     rev.endsWith('+other')
       ? check(CHECK.statusListIssuer, {
@@ -501,7 +527,7 @@ const build = (sig: Sig, rev: Rev, end: End, iss: Iss, sch: Sch): VerificationRe
     verifiableCredential: {
       issuer: { id: 'did:key:z6Mkn', name: 'Springfield College' },
       validUntil: end === 'past' ? PAST : FUTURE,
-      validFrom: sig === 'not_yet_valid' ? FUTURE : '2025-01-09T10:00:00Z',
+      validFrom: val === 'not_yet_valid' ? FUTURE : '2025-01-09T10:00:00Z',
       // "none" means the issuer never set up a way to withdraw it at all.
       ...(rev === 'none' ? {} : { credentialStatus: { type: 'BitstringStatusListEntry' } }),
     },
@@ -518,43 +544,49 @@ const HOST_LIST: ('loaded' | 'unavailable')[] = ['loaded', 'unavailable'];
 
 /**
  * A check is only ever skipped as "not run" because one before it failed
- * fatally: the signature for everything after it, the withdrawal check for
- * the issuer lookup and the schema. A `halted` check with nothing failed
- * ahead of it is a contradiction in the input, not a combination the rules
- * owe an answer to, so it is left out — everything else, possible or not,
- * stays in.
+ * fatally and halted: since 2.0.0-beta.1 that is the signature, for
+ * everything after it. Expiry and the withdrawal check are fatal but halt
+ * nothing. A `halted` check with no failed signature ahead of it is a
+ * contradiction in the input, not a combination the rules owe an answer to,
+ * so it is left out — everything else, possible or not, stays in.
  */
-const SIG_FATAL: Sig[] = ['tampered', 'expired', 'not_yet_valid', 'key_mismatch', 'unattributable'];
-const REV_FATAL: Rev[] = ['revoked', 'suspended', 'revoked+other', 'suspended+other', 'list_error'];
-const coherent = (sig: Sig, rev: Rev, iss: Iss, sch: Sch): boolean => {
-  const before = SIG_FATAL.includes(sig);
-  if (rev === 'halted' && !before) return false;
-  const beforeLater = before || REV_FATAL.includes(rev);
-  return (iss !== 'halted' && sch !== 'halted') || beforeLater;
-};
+const SIG_FATAL: Sig[] = ['tampered', 'key_mismatch', 'unattributable'];
+const coherent = (sig: Sig, val: Val, rev: Rev, iss: Iss, sch: Sch): boolean =>
+  SIG_FATAL.includes(sig) || ![val, rev, iss, sch].includes('halted');
 
 const cases = SIGNATURES.flatMap((sig) =>
-  REVOCATIONS.flatMap((rev) =>
-    ENDS.flatMap((end) =>
-      ISSUERS.flatMap((iss) =>
-        SCHEMAS.filter((sch) => coherent(sig, rev, iss, sch)).flatMap((sch) =>
-          HOST_LIST.map((list) => ({ sig, rev, end, iss, sch, list, name: `${sig}/${rev}/${end}/${iss}/${sch}/${list}` })),
+  VALIDITIES.flatMap((val) =>
+    REVOCATIONS.flatMap((rev) =>
+      ENDS.flatMap((end) =>
+        ISSUERS.flatMap((iss) =>
+          SCHEMAS.filter((sch) => coherent(sig, val, rev, iss, sch)).flatMap((sch) =>
+            HOST_LIST.map((list) => ({
+              sig,
+              val,
+              rev,
+              end,
+              iss,
+              sch,
+              list,
+              name: `${sig}/${val}/${rev}/${end}/${iss}/${sch}/${list}`,
+            })),
+          ),
         ),
       ),
     ),
   ),
 );
 
-const DATES_ROW = `${CHECK.signature}#dates`;
+const DATES_ROW = CHECK.validityPeriod;
 
 describe(`the headline and the breakdown agree (${cases.length} combinations)`, () => {
-  it.each(cases)('$name', ({ sig, rev, end, iss, sch, list }) => {
-    const r = build(sig, rev, end, iss, sch);
+  it.each(cases)('$name', ({ sig, val, rev, end, iss, sch, list, name }) => {
+    const r = build(sig, val, rev, end, iss, sch);
     const options = { registriesUnavailable: list === 'unavailable' };
     const out = summarise(r, options);
     const rows = listChecks(r, options);
     const row = (id: string) => rows.find((c) => c.id === id);
-    const where = `${sig}/${rev}/${end}/${iss}/${sch}/${list} → ${out.code}`;
+    const where = `${name} → ${out.code}`;
 
     expect(rows.length, `${where}: verification ran, so there must be rows`).toBeGreaterThan(0);
 
@@ -680,6 +712,7 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
     // when the seal failed, which talks about the seal instead (James, 1
     // October 2026): that is the reason, and it outranks the lookup.
     const haltedRows = [
+      val === 'halted' && DATES_ROW,
       rev === 'halted' && CHECK.status,
       iss === 'halted' && CHECK.registeredIssuer,
       sch === 'halted' && CHECK.schema,
@@ -702,6 +735,7 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
       withdrawal_unknown: [CHECK.status, 'unchecked'],
       expired: [DATES_ROW, 'warning'],
       not_yet_valid: [DATES_ROW, 'warning'],
+      dates_unchecked: [DATES_ROW, 'unchecked'],
       key_mismatch: [CHECK.registeredIssuer, 'error'],
       malformed: [CHECK.schema, 'warning'],
     };
@@ -741,13 +775,13 @@ const NAMELESS: [string, unknown][] = [
 
 describe(`an issuer with no name is never addressed by its identifier (${cases.length} combinations each)`, () => {
   it.each(NAMELESS)('%s', (_, issuer) => {
-    for (const { sig, rev, end, iss, sch, list } of cases) {
-      const r = build(sig, rev, end, iss, sch);
+    for (const { sig, val, rev, end, iss, sch, list, name } of cases) {
+      const r = build(sig, val, rev, end, iss, sch);
       r.verifiableCredential = { ...r.verifiableCredential, issuer };
       const out = summarise(r, { registriesUnavailable: list === 'unavailable' });
       // Two spaces in a row: an empty name dropped into a sentence.
       for (const sentence of [out.headline, out.detail, out.action ?? '']) {
-        expect(sentence, `${sig}/${rev}/${end}/${iss}/${sch}/${list} → ${out.code}`).not.toMatch(/did:|Unknown issuer|\s\s/);
+        expect(sentence, `${name} → ${out.code}`).not.toMatch(/did:|Unknown issuer|\s\s/);
       }
     }
   });
@@ -758,7 +792,7 @@ describe('a credential that is both withdrawn and expired', () => {
   // catch: expiry moved ahead of withdrawal, so the headline was a warning
   // about renewal while the breakdown reported an error.
   it('reports the withdrawal, because the issuer has already decided', () => {
-    const r = build('expired', 'revoked', 'past', 'matched', 'valid');
+    const r = build('passed', 'expired', 'revoked', 'past', 'matched', 'valid');
     const out = summarise(r);
     expect(out.code).toBe('withdrawn');
     expect(out.severity).toBe('error');

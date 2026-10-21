@@ -4,19 +4,15 @@
  * Kept deliberately thin. Everything that decides what a person reads lives in
  * outcomes.ts, so it can be tested without a browser or a network.
  *
- * Thin does not mean empty, though. Three of 2.x's defaults are wrong for this
- * component, and correcting them is this file's real job — see `verbose`,
- * `recognizers` and `additionalSuites` below. Left alone, 2.x reports a
- * credential that violates its own standard as verified, and reports a check
- * that passed identically to one that never ran. A fourth correction is a
- * stopgap for a library bug: see `namingDidWebOutages`.
+ * Thin does not mean empty, though. Two of 2.x's defaults are wrong for this
+ * component, and correcting them is this file's real job — see `recognizers`
+ * and `additionalSuites` below. Left alone, 2.x reports a credential that
+ * violates its own standard as verified, with nothing to show for it.
  */
 
 import { BuiltinHttpGetService, verifyCredential } from '@digitalcredentials/verifier-core';
-import {
-  obv3p0Recognizer,
-  openBadgesSchemaSuite,
-} from '@digitalcredentials/verifier-core/openbadges';
+import { obv3p0Recognizer } from '@digitalcredentials/verifier-core/openbadges';
+import { openBadgesSchemaSuite } from '@digitalcredentials/verifier-core/openbadges/schema';
 import type { VerificationResponse } from './types.js';
 
 export interface Registry {
@@ -86,78 +82,11 @@ const devHttpGetService = {
 };
 
 /**
- * verifier-core's HttpGetService, restated. Named from the library, it would
- * put an import of verifier-core in the published types, and hosts never
- * install verifier-core: it is bundled.
- */
-interface HttpGetService {
-  get: (url: string) => Promise<{ body: unknown; headers: Headers; status: number }>;
-}
-
-/**
- * The error verifier-core's signature check recognises as "a fetch failed":
- * it goes by the name, and reads the address from `requestUrl`.
- */
-class HTTPError extends Error {
-  override name = 'HTTPError';
-  constructor(
-    message: string,
-    readonly requestUrl: string,
-    options?: { cause?: unknown },
-  ) {
-    super(message, options);
-  }
-}
-
-/**
- * Stopgap for verifier-core#65: an issuer website that is down reads as down,
- * not as tampering.
- *
- * A did:web issuer publishes its signing key in a did.json on its own site.
- * When that file won't load — the site doesn't answer, or answers 404 —
- * verifier-core's did:web resolver throws a plain Error, and its signature
- * check, which only knows a fetch failed if the error is named `HTTPError`,
- * reports INVALID_SIGNATURE: what a tampered credential gets. outcomes.ts
- * then tells an earner their honest credential was tampered with.
- *
- * This wraps the fetcher so a did.json that won't load fails with an
- * `HTTPError` naming its address. The signature check then reports
- * DID_WEB_UNRESOLVED, which outcomes.ts already words as "we couldn't reach"
- * the issuer's website (verified against the library and vc-test-fixtures'
- * badDidWeb.json, 8 October 2026). Delete this when verifier-core#65 is fixed.
- *
- * - "Won't load" includes the built-in fetcher refusing it: an issuer on a
- *   private address, too many redirects, a body over 5 MB. We didn't reach
- *   their key, which is true; telling refusals apart would mean reading the
- *   fetcher's sentences, which outcomes.ts doesn't do. It used to say tampered.
- * - The signature check only says DID_WEB_UNRESOLVED when the address
- *   contains the issuer's did:web, so a key on another host, or an issuer
- *   whose did:web has a port, reads as HTTP_ERROR instead: "something we
- *   needed didn't load". Not tampered either.
- * - Only addresses ending in /did.json, which is where did:web keeps a key;
- *   status lists and registries don't, and get their statuses back as
- *   before, to branch on themselves. A did.json that loads but is wrong is
- *   left alone: that is not an outage.
- */
-export const namingDidWebOutages = (inner: HttpGetService): HttpGetService => ({
-  get: async (url) => {
-    if (!url.endsWith('/did.json')) return inner.get(url);
-    const result = await inner.get(url).catch((error: unknown) => {
-      throw new HTTPError(`Could not fetch ${url}`, url, { cause: error });
-    });
-    if (result.status < 200 || result.status >= 300) {
-      throw new HTTPError(`Could not fetch ${url}: HTTP ${result.status}`, url);
-    }
-    return result;
-  },
-});
-
-/**
  * One for the life of the page: verifier-core keeps a document loader, and
  * its cache, per fetcher. The built-in fetcher is what verifier-core uses when
  * given none, so builds lose nothing by being given this.
  */
-const httpGetService = namingDidWebOutages(import.meta.env.DEV ? devHttpGetService : BuiltinHttpGetService());
+const httpGetService = import.meta.env.DEV ? devHttpGetService : BuiltinHttpGetService();
 
 /**
  * The status-list gap is closed, and it closed upstream rather than here.
@@ -199,8 +128,7 @@ export const verify = async (
     ...(options.registriesUnavailable ? {} : { registries: registries as never }),
 
     // The built-in fetcher in builds, the dev one under the dev server and in
-    // the browser tests (see devHttpGetService), each wrapped by
-    // namingDidWebOutages. Note what the dev one costs: the cross-site tests
+    // the browser tests (see devHttpGetService). Note what the dev one costs: the cross-site tests
     // (pages-like-server.js, which refuses CORS preflights as GitHub Pages
     // does) exercise it, not the built-in one. Both send a bare GET with no
     // custom headers, so neither triggers a preflight (read off the library,
@@ -208,21 +136,12 @@ export const verify = async (
     // built-in one for real.
     httpGetService,
 
-    // 2.x defaults this to false, which drops every check that passed and
-    // keeps only failures and skips. A passed check and a check that never ran
-    // would then both be simply absent, and telling those two apart is the
-    // single thing this component must not get wrong — six of the ten defects
-    // found in review were a verdict claiming something the breakdown said was
-    // never checked. The per-suite rollup cannot stand in for it either: its
-    // counts are per suite, not per check.
-    verbose: true,
-
     // Without a recognizer, 2.x skips recognition entirely and hands back no
     // normalized form. Supplying it is also what makes `recognizedProfile`
     // meaningful for the developer view later.
     recognizers: [obv3p0Recognizer],
 
-    // The Open Badges schema check is not in the default suites, so a
+    // The Open Badges schema checks are not in the default suites, so a
     // credential that breaks its own standard comes back verified with nothing
     // to show. In 1.x the same check ran unasked and was filed under
     // `additionalInformation`. Adding it back keeps the "How it was built" row
@@ -231,7 +150,10 @@ export const verify = async (
     // Only the schema suite. The semantic suite's extra checks (result
     // references, achievement levels) are real but we display none of them,
     // and running checks we throw away would slow every verification for
-    // nothing.
+    // nothing. Since 2.0.0-beta.1 it validates against the Open Badges
+    // schemas bundled with the library, chosen by the credential's type, and
+    // fetches nothing. Its second check, on a declared `credentialSchema`
+    // that doesn't fit, shows in the developer view only.
     additionalSuites: [openBadgesSchemaSuite],
   })) as VerificationResponse;
 };

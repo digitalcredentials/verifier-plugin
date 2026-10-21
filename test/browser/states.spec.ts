@@ -637,12 +637,19 @@ test.describe('lifecycle, from review', () => {
     await viewButton(page, 'Developer view').click();
 
     // Mid-check, the old run's rows and checks must be gone rather than
-    // sitting under a verdict that no longer describes them.
+    // sitting under a verdict that no longer describes them. Counted as the
+    // check starts: with nothing to fetch, it can now finish within a tick.
     const during = await page.evaluate(async () => {
       const el = document.getElementById('vc') as HTMLElement & { registries?: unknown };
+      const started = new Promise<number>((resolve) =>
+        el.addEventListener(
+          'verification-started',
+          () => resolve(el.shadowRoot!.querySelectorAll('.check, .dev-check').length),
+          { once: true },
+        ),
+      );
       el.registries = [];
-      await new Promise((r) => setTimeout(r, 0));
-      return el.shadowRoot!.querySelectorAll('.check, .dev-check').length;
+      return started;
     });
     expect(during).toBe(0);
 

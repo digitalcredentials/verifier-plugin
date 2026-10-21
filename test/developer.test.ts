@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { verifyCredential } from '@digitalcredentials/verifier-core';
 import { obv3p0Recognizer } from '@digitalcredentials/verifier-core/openbadges';
+import { openBadgesSchemaSuite } from '@digitalcredentials/verifier-core/openbadges/schema';
 import { groupChecks, checkName, belongsTo } from '../src/developer.js';
 import { CHECK } from '../src/types.js';
 import type { CheckResult, SuiteSummary, VerificationResponse } from '../src/types.js';
@@ -12,9 +13,10 @@ import type { CheckResult, SuiteSummary, VerificationResponse } from '../src/typ
  * a change in how it names or groups its checks fails here rather than
  * quietly dropping a row.
  *
- * No network: `registries: []` skips the lookup, and did:key resolves locally.
- * The Open Badges schema suite is left out because it fetches the schema from
- * purl.imsglobal.org; its doubled-"schema" id is covered by hand below.
+ * No network: `registries: []` skips the lookup, did:key resolves locally, and
+ * the Open Badges schema suite validates against schemas bundled with the
+ * library (2.0.0-beta.1; before, it fetched them from purl.imsglobal.org and
+ * was left out here).
  */
 
 const fixture = (name: string): Record<string, unknown> =>
@@ -24,8 +26,8 @@ const verify = async (name: string): Promise<VerificationResponse> =>
   (await verifyCredential({
     credential: fixture(name),
     registries: [],
-    verbose: true,
     recognizers: [obv3p0Recognizer],
+    additionalSuites: [openBadgesSchemaSuite],
   })) as VerificationResponse;
 
 const ids = (r: VerificationResponse) => (r.results ?? []).map((c) => c.id);
@@ -76,14 +78,12 @@ const suite = (id: string, message = 'm'): SuiteSummary => ({
   phase: id.split('.')[0]!,
   suite: id.split('.').slice(1).join('.'),
   status: 'success',
-  verified: true,
   message,
   counts: { passed: 1, failed: 0, skipped: 0 },
 });
 
-const check = (id: string | undefined, extra: Partial<CheckResult> = {}): CheckResult => ({
+const check = (id: string, extra: Partial<CheckResult> = {}): CheckResult => ({
   id,
-  check: 'c',
   suite: 's',
   outcome: { status: 'success', message: 'ok' },
   ...extra,
@@ -152,9 +152,5 @@ describe('checkName', () => {
     expect(checkName(check('recognition'), 'recognition')).toBe('recognition');
     expect(checkName(check('a.b'))).toBe('a.b');
     expect(checkName(check('a.b'), 'c')).toBe('a.b');
-  });
-
-  it('falls back to suite and check for a result with no id', () => {
-    expect(checkName(check(undefined, { suite: 'core', check: 'proof' }))).toBe('core.proof');
   });
 });
