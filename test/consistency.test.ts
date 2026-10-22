@@ -522,7 +522,11 @@ const build = (sig: Sig, val: Val, rev: Rev, end: End, iss: Iss, sch: Sch): Veri
     signatureCheck(sig),
     validityCheck(val),
     revocationCheck(rev),
-    rev.endsWith('+other')
+    // The library compares the list's signer for every list it read, and
+    // reports a pass for the issuer's own.
+    ['passed', 'revoked', 'suspended'].includes(rev)
+      ? check(CHECK.statusListIssuer, { status: 'success', message: 'The status list was issued by the credential issuer.' })
+      : rev.endsWith('+other')
       ? check(CHECK.statusListIssuer, {
           status: 'failure',
           problems: [
@@ -561,11 +565,13 @@ const HOST_LIST: ('loaded' | 'unavailable')[] = ['loaded', 'unavailable'];
 /**
  * Whose withdrawal lists are believed. `any` is the default; `issuers` is
  * `requireIssuerSignedStatusList`, the stricter rule kept for when DCC's
- * issuers sign their own lists. It only changes anything for a list someone
- * else signed, so only those combinations run both ways.
+ * issuers sign their own lists. Every list that was read runs both ways: a
+ * list someone else signed, where it matters, and the issuer's own, where it
+ * must change nothing.
  */
 type Lists = 'any' | 'issuers';
-const listsFor = (rev: Rev): Lists[] => (rev.endsWith('+other') ? ['any', 'issuers'] : ['any']);
+const listsFor = (rev: Rev): Lists[] =>
+  rev.endsWith('+other') || ['passed', 'revoked', 'suspended'].includes(rev) ? ['any', 'issuers'] : ['any'];
 
 /**
  * A check is only ever skipped as "not run" because one before it failed
@@ -625,6 +631,14 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
       const own = build(sig, val, rev.replace('+other', '') as Rev, end, iss, sch);
       expect(out, `${where}: reads differently from the issuer's own list`).toEqual(summarise(own, options));
       expect(rows, `${where}: rows differ from the issuer's own list`).toEqual(listChecks(own, options));
+    }
+
+    // With only the issuer's own lists believed, the issuer's own reads just
+    // as it does by default.
+    if (lists === 'issuers' && !rev.endsWith('+other')) {
+      const loose = { ...options, requireIssuerSignedStatusList: false };
+      expect(out, `${where}: refused the issuer's own list`).toEqual(summarise(r, loose));
+      expect(rows, `${where}: refused the issuer's own list`).toEqual(listChecks(r, loose));
     }
 
     // With only the issuer's own lists believed, a list someone else signed

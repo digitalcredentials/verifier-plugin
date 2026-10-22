@@ -1604,6 +1604,32 @@ describe('a withdrawal list signed by someone other than the issuer, by default'
 });
 
 describe('a withdrawal list signed by someone other than the issuer, when only the issuer\'s own is believed', () => {
+  it('still believes the issuer\'s own list', () => {
+    const r = ok();
+    set(r, revokedBy(PROBLEM.revoked, 'Credential Revoked'));
+    add(r, pass(CHECK.statusListIssuer, 'The status list was issued by the credential issuer.'));
+    expect(summarise(r, STRICT).code).toBe('withdrawn');
+    expect(strictRow(r, CHECK.status)?.value).toBe('deactivated by the issuer');
+  });
+
+  it.each([
+    ['errored', () => fail(CHECK.statusListIssuer, [{ type: 'https://www.w3.org/TR/vc-data-model#CHECK_ERROR', title: 'Check Error', detail: 'x' }])],
+    ['was skipped', () => skip(CHECK.statusListIssuer, 'No status list was checked.')],
+  ])('believes nothing when the check of the list\'s signer %s', (_, listIssuer) => {
+    // Fail closed: an unconfirmed signer is not the issuer's by default.
+    const r = ok();
+    add(r, listIssuer());
+    const out = summarise(r, STRICT);
+    expect(out.code).toBe('withdrawal_unknown');
+    expect(`${out.headline} ${out.detail}`).not.toMatch(/hasn['’]t (?:withdrawn|deactivated)/);
+  });
+
+  it('believes nothing when there is no check of the list\'s signer at all', () => {
+    const r = ok();
+    set(r, revokedBy(PROBLEM.revoked, 'Credential Revoked'));
+    expect(summarise(r, STRICT).code).toBe('withdrawal_unknown');
+  });
+
   // A mismatch on a list that marked the credential arrives since
   // 2.0.0-beta.1: before, a mark ended the status suite before the signer was
   // compared, and only a list that passed reported it.

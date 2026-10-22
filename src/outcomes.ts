@@ -51,9 +51,10 @@ export interface Check {
  * exactly what happened, rather than the vaguer "we couldn't finish checking".
  *
  * `requireIssuerSignedStatusList`: believe a withdrawal list only when the
- * credential's own issuer signed it. Off, which is the default, a list signed
- * by someone else is read like any other, as verifier-core does, and the
- * mismatch shows only in the Developer view as the library's warning.
+ * library confirmed the credential's own issuer signed it. Off, which is the
+ * default, a list signed by someone else is read like any other, as
+ * verifier-core does: its check of the signer is non-fatal, and shows only in
+ * the Developer view, in the library's words, as "Failed: list-issuer".
  *
  * Off because DCC's own status service signs every list with its own key
  * (status-list-lambda), and the batch issuer signs each batch with a fresh
@@ -65,6 +66,9 @@ export interface Check {
  * default, once DCC's issuers sign their own lists. Meanwhile we can't notice
  * a list re-signed by someone else, which for these credentials the check
  * couldn't tell from the normal case anyway.
+ *
+ * Not a property of <verifier-credential>: no host needs to choose this, and
+ * switching back is ours to do, by changing the default here.
  */
 export interface OutcomeOptions {
   registriesUnavailable?: boolean;
@@ -279,15 +283,41 @@ const listNotIssuers = (checks: Map<string, CheckResult>): boolean =>
   hasProblem(checks.get(CHECK.statusListIssuer), PROBLEM.statusListIssuerMismatch);
 
 /**
- * The checks the headline and the breakdown act on: all of them, less the
- * list-issuer check unless `requireIssuerSignedStatusList` asks for it. Done
- * once, here, so the two can't disagree about whose list is believed. The
- * Developer view reads the library's results directly, so it still shows the
- * warning either way.
+ * The checks the headline and the breakdown act on. Done once, here, so the
+ * two can't disagree about whose list is believed. The Developer view reads
+ * the library's results directly, so it shows the list-issuer check either way.
+ *
+ * By default, all of them less the list-issuer check, so a list is read
+ * whoever signed it. With `requireIssuerSignedStatusList`, a list that was
+ * read (it passed, or marked the credential) is believed only when the
+ * list-issuer check passed: one that errored, was skipped or is missing
+ * confirms nothing, and counts as someone else's, rather than as the issuer's
+ * by default.
  */
 const believedChecks = (r: VerificationResponse, options: OutcomeOptions): Map<string, CheckResult> => {
   const checks = checksById(r);
-  if (!options.requireIssuerSignedStatusList) checks.delete(CHECK.statusListIssuer);
+  if (!options.requireIssuerSignedStatusList) {
+    checks.delete(CHECK.statusListIssuer);
+    return checks;
+  }
+  const status = checks.get(CHECK.status);
+  const listRead = passed(status) || hasProblem(status, PROBLEM.revoked) || hasProblem(status, PROBLEM.suspended);
+  if (listRead && !passed(checks.get(CHECK.statusListIssuer))) {
+    checks.set(CHECK.statusListIssuer, {
+      id: CHECK.statusListIssuer,
+      suite: 'status',
+      outcome: {
+        status: 'failure',
+        problems: [
+          {
+            type: PROBLEM.statusListIssuerMismatch,
+            title: 'Status List Issuer Not Confirmed',
+            detail: "The library didn't confirm that the credential's issuer signed its status list.",
+          },
+        ],
+      },
+    });
+  }
   return checks;
 };
 
@@ -1045,8 +1075,9 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
   // The seal held, so the dates check ran — unless something stopped it, or it
   // failed without naming a date (a check that throws reports CHECK_ERROR).
   // Then we don't know whether this is in force. Below the withdrawal list's
-  // unknowns, which name what we couldn't check and, for a list someone else
-  // signed, whose it is to fix; above who issued it, since "Genuine, but we
+  // unknowns, which name what we couldn't check and, under
+  // requireIssuerSignedStatusList for a list someone else signed, whose it
+  // is to fix; above who issued it, since "Genuine, but we
   // can't confirm who issued it" would say nothing of the dates the Dates row
   // reports unchecked.
   if (!passed(checks.get(CHECK.validityPeriod))) {
