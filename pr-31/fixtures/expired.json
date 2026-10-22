@@ -40,9 +40,9 @@
   "validUntil": "2026-01-09T10:00:00Z",
   "proof": {
     "type": "Ed25519Signature2020",
-    "created": "2026-10-21T19:22:53Z",
+    "created": "2026-10-22T18:27:50Z",
     "verificationMethod": "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z#z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z",
     "proofPurpose": "assertionMethod",
-    "proofValue": "z518UJUAWkfNRYESQhRSJk5QknKEwX8cfiwBDhA9E3tZnjsfkAmMF4vYKeh812pY49maKDj7NPvBP5qNVBbcZMKEM"
+    "proofValue": "z5vm2bfumkVrW9NWZ6ejPHZ5oiJadE1GRSjT2G9fPjgPrWQTswHWpG2h9sfUtRmgupEk4CjM6pY1RG31eZRYBtSoX"
   }
 }
