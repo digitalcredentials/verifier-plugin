@@ -1629,6 +1629,18 @@ describe('a withdrawal list signed by someone other than the issuer, when only t
     expect(strictRow(r, CHECK.status)).toMatchObject({ severity: 'unchecked', value: 'not checked' });
   });
 
+  it('believes nothing when the check of the list\'s signer was skipped', () => {
+    // The library doesn't skip it for a list it read; if that ever changes, a
+    // skip confirms nothing either.
+    const r = ok();
+    set(r, revokedBy(PROBLEM.revoked, 'Credential Revoked'));
+    add(r, skip(CHECK.statusListIssuer, 'Skipped.'));
+    const out = summarise(r, STRICT);
+    expect(out.code).toBe('withdrawal_unknown');
+    expect(out.detail).toContain("we couldn't finish that check");
+    expect(strictRow(r, CHECK.status)).toMatchObject({ severity: 'unchecked', value: 'not checked' });
+  });
+
   it('believes nothing when there is no check of the list\'s signer at all', () => {
     const r = ok();
     set(r, revokedBy(PROBLEM.revoked, 'Credential Revoked'));

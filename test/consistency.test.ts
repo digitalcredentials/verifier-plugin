@@ -685,7 +685,15 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
         expect(out.detail, `${where}: the wrong reason`).toMatch(
           stranger ? /may not be from the issuer/ : /couldn't finish that check/,
         );
+        // ...and the right thing to do: tell the issuer about their list, or
+        // try again later.
+        expect(out.action, `${where}: the wrong action`).toMatch(
+          stranger ? /^Let .+ know we couldn't check whether this copy is still active\.$/ : /^Try again in a little while\.$/,
+        );
       }
+      // Only behind a seal that held: behind a broken one the Status row is
+      // about the seal, and reads "not checked" whatever the list said
+      // (verifier-plugin#32).
       if (row(CHECK.signature)?.severity === 'success') {
         expect(row(CHECK.status)?.value, `${where}: the wrong Status row`).toBe(
           stranger ? "couldn't check — the information we found may not be from the issuer" : 'not checked',
