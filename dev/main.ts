@@ -49,7 +49,6 @@ const SITUATIONS: Situation[] = [
   { label: 'Built wrong', file: 'malformed', registries: LOCAL_REGISTRY, note: 'genuine, but missing a field its standard requires' },
   { label: 'Changed', file: 'tampered', registries: LOCAL_REGISTRY, note: 'altered after issuing' },
   { label: 'Not their seal', file: 'not-their-seal', registries: LOCAL_REGISTRY, note: "names the issuer, signed with someone else's key" },
-  { label: 'Untrusted list', file: 'list-not-issuers', registries: LOCAL_REGISTRY, note: "its withdrawal list isn't signed by the issuer" },
   { label: 'No signature', file: 'unsigned', registries: LOCAL_REGISTRY, note: 'nothing to check' },
 ];
 

@@ -282,11 +282,10 @@ const main = async () => {
   );
 
   // --- withdrawal list not the issuer's -------------------------------------
-  // Not marked on it: the case verifier-core reports. A mark would end its
-  // status suite at the withdrawal check, which is fatal, before the check
-  // that compares the list's signer runs — so a stranger's "withdrawn" still
-  // reads as the issuer's, and nothing in the result says otherwise (raised
-  // upstream). outcomes.ts handles that case too, once the library reports it.
+  // Clear on a list signed by another key. Read like the issuer's own by
+  // default, with the library's mismatch warning in the Developer view; only
+  // `requireIssuerSignedStatusList` refuses it. Not a demo button, since it
+  // reads like "Not withdrawn"; the browser tests load it directly.
   await write(
     'list-not-issuers',
     await sign(

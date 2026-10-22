@@ -559,6 +559,15 @@ const build = (sig: Sig, val: Val, rev: Rev, end: End, iss: Iss, sch: Sch): Veri
 const HOST_LIST: ('loaded' | 'unavailable')[] = ['loaded', 'unavailable'];
 
 /**
+ * Whose withdrawal lists are believed. `any` is the default; `issuers` is
+ * `requireIssuerSignedStatusList`, the stricter rule kept for when DCC's
+ * issuers sign their own lists. It only changes anything for a list someone
+ * else signed, so only those combinations run both ways.
+ */
+type Lists = 'any' | 'issuers';
+const listsFor = (rev: Rev): Lists[] => (rev.endsWith('+other') ? ['any', 'issuers'] : ['any']);
+
+/**
  * A check is only ever skipped as "not run" because one before it failed
  * fatally and halted: since 2.0.0-beta.1 that is the signature, for
  * everything after it. Expiry and the withdrawal check are fatal but halt
@@ -576,16 +585,19 @@ const cases = SIGNATURES.flatMap((sig) =>
       ENDS.flatMap((end) =>
         ISSUERS.flatMap((iss) =>
           SCHEMAS.filter((sch) => coherent(sig, val, rev, iss, sch)).flatMap((sch) =>
-            HOST_LIST.map((list) => ({
-              sig,
-              val,
-              rev,
-              end,
-              iss,
-              sch,
-              list,
-              name: `${sig}/${val}/${rev}/${end}/${iss}/${sch}/${list}`,
-            })),
+            HOST_LIST.flatMap((list) =>
+              listsFor(rev).map((lists) => ({
+                sig,
+                val,
+                rev,
+                end,
+                iss,
+                sch,
+                list,
+                lists,
+                name: `${sig}/${val}/${rev}/${end}/${iss}/${sch}/${list}${lists === 'issuers' ? '/issuers-lists-only' : ''}`,
+              })),
+            ),
           ),
         ),
       ),
@@ -596,15 +608,35 @@ const cases = SIGNATURES.flatMap((sig) =>
 const DATES_ROW = CHECK.validityPeriod;
 
 describe(`the headline and the breakdown agree (${cases.length} combinations)`, () => {
-  it.each(cases)('$name', ({ sig, val, rev, end, iss, sch, list, name }) => {
+  it.each(cases)('$name', ({ sig, val, rev, end, iss, sch, list, lists, name }) => {
     const r = build(sig, val, rev, end, iss, sch);
-    const options = { registriesUnavailable: list === 'unavailable' };
+    const options = { registriesUnavailable: list === 'unavailable', requireIssuerSignedStatusList: lists === 'issuers' };
     const out = summarise(r, options);
     const rows = listChecks(r, options);
     const row = (id: string) => rows.find((c) => c.id === id);
     const where = `${name} → ${out.code}`;
 
     expect(rows.length, `${where}: verification ran, so there must be rows`).toBeGreaterThan(0);
+
+    // By default a list someone else signed is read like the issuer's own:
+    // the same headline and the same rows as without the mismatch, whatever
+    // the list said and whatever else happened.
+    if (lists === 'any' && rev.endsWith('+other')) {
+      const own = build(sig, val, rev.replace('+other', '') as Rev, end, iss, sch);
+      expect(out, `${where}: reads differently from the issuer's own list`).toEqual(summarise(own, options));
+      expect(rows, `${where}: rows differ from the issuer's own list`).toEqual(listChecks(own, options));
+    }
+
+    // With only the issuer's own lists believed, a list someone else signed
+    // settles nothing either way: not "deactivated", not "on hold", not "the
+    // issuer hasn't deactivated it".
+    if (lists === 'issuers' && rev.endsWith('+other')) {
+      expect(['withdrawn', 'suspended'], `${where}: believed a list the issuer didn't sign`).not.toContain(out.code);
+      expect(row(CHECK.status)?.severity, `${where}: the Status row believed a list the issuer didn't sign`).toBe('unchecked');
+      expect(`${out.headline} ${out.detail}`, `${where}: believed a list the issuer didn't sign`).not.toMatch(
+        /hasn['’]t (?:withdrawn|deactivated)/,
+      );
+    }
 
     // A clean verdict cannot sit above a row reporting a problem.
     if (out.severity === 'success') {
@@ -829,10 +861,10 @@ const NAMELESS: [string, unknown][] = [
 
 describe(`an issuer with no name is never addressed by its identifier (${cases.length} combinations each)`, () => {
   it.each(NAMELESS)('%s', (_, issuer) => {
-    for (const { sig, val, rev, end, iss, sch, list, name } of cases) {
+    for (const { sig, val, rev, end, iss, sch, list, lists, name } of cases) {
       const r = build(sig, val, rev, end, iss, sch);
       r.verifiableCredential = { ...r.verifiableCredential, issuer };
-      const out = summarise(r, { registriesUnavailable: list === 'unavailable' });
+      const out = summarise(r, { registriesUnavailable: list === 'unavailable', requireIssuerSignedStatusList: lists === 'issuers' });
       // Two spaces in a row: an empty name dropped into a sentence.
       for (const sentence of [out.headline, out.detail, out.action ?? '']) {
         expect(sentence, `${name} → ${out.code}`).not.toMatch(/did:|Unknown issuer|\s\s/);

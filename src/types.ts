@@ -172,9 +172,11 @@ export const PROBLEM = {
    * The withdrawal list was signed by someone other than the credential's
    * issuer. verifier-core reports it as a warning and leaves `verified` alone,
    * because some status services sign every list with their own DID, and says
-   * consumers who need the binding should treat it as decisive. We do: whoever
+   * consumers who need the binding should treat it as decisive. Whoever
    * controls the list's host could otherwise mark a credential withdrawn, or
-   * un-withdraw it, so its answer is not ours to repeat either way.
+   * un-withdraw it. We treat it as decisive only with
+   * `requireIssuerSignedStatusList`, off for now because DCC's own status
+   * service is one of those services: see OutcomeOptions.
    */
   statusListIssuerMismatch: 'https://www.w3.org/TR/vc-data-model#STATUS_LIST_ISSUER_MISMATCH',
 } as const;

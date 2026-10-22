@@ -1578,7 +1578,32 @@ describe('a suspended credential', () => {
   });
 });
 
-describe('a withdrawal list signed by someone other than the issuer', () => {
+/** Only a list the credential's own issuer signed is believed: off by default (see OutcomeOptions). */
+const STRICT = { requireIssuerSignedStatusList: true } as const;
+const strictRow = (r: VerificationResponse, id: string) => listChecks(r, STRICT).find((c) => c.id === id);
+
+describe('a withdrawal list signed by someone other than the issuer, by default', () => {
+  // Read like any other (Nate Otto, 22 October 2026): DCC's own status
+  // service signs every list with its own key. The mismatch is the library's
+  // warning in the Developer view; the headline and rows don't change.
+  it.each([
+    ['clear', () => pass(CHECK.status, 'Credential status is valid (not revoked or suspended).'), 'verified', 'not deactivated or on hold'],
+    ['deactivated', () => revokedBy(PROBLEM.revoked, 'Credential Revoked'), 'withdrawn', 'deactivated by the issuer'],
+    ['on hold', () => revokedBy(PROBLEM.suspended, 'Credential Suspended'), 'suspended', 'put on hold by the issuer'],
+  ])('reads a list that says %s exactly as the issuer\'s own', (_, status, code, value) => {
+    const own = ok();
+    set(own, status());
+    const others = ok();
+    set(others, status());
+    add(others, listSignedByAnother());
+    expect(summarise(others)).toEqual(summarise(own));
+    expect(listChecks(others)).toEqual(listChecks(own));
+    expect(summarise(others).code).toBe(code);
+    expect(row(others, CHECK.status)?.value).toBe(value);
+  });
+});
+
+describe('a withdrawal list signed by someone other than the issuer, when only the issuer\'s own is believed', () => {
   // A mismatch on a list that marked the credential arrives since
   // 2.0.0-beta.1: before, a mark ended the status suite before the signer was
   // compared, and only a list that passed reported it.
@@ -1586,25 +1611,25 @@ describe('a withdrawal list signed by someone other than the issuer', () => {
     const r = ok();
     set(r, revokedBy(PROBLEM.revoked, 'Credential Revoked'));
     add(r, listSignedByAnother());
-    const out = summarise(r);
+    const out = summarise(r, STRICT);
     expect(out).toMatchObject({ severity: 'unchecked', code: 'withdrawal_unknown' });
     expect(out.detail).toContain('The status information we found may not be from the issuer');
     // Retrying cannot fix a list signed by the wrong key.
     expect(out.action).not.toContain('Try again');
-    expect(row(r, CHECK.status)).toMatchObject({
+    expect(strictRow(r, CHECK.status)).toMatchObject({
       severity: 'unchecked',
       value: "couldn't check — the information we found may not be from the issuer",
     });
     expect(out.action).toBe("Let Springfield College know we couldn't check whether this copy is still active.");
     // The earner doesn't know there is a list; that belongs in the Developer view.
-    expect(`${out.detail} ${out.action} ${row(r, CHECK.status)?.value}`).not.toMatch(/\blist(s|ed)?\b/i);
+    expect(`${out.detail} ${out.action} ${strictRow(r, CHECK.status)?.value}`).not.toMatch(/\blist(s|ed)?\b/i);
   });
 
   it('does not put a bare identifier mid-sentence when the issuer gives no name', () => {
     const r = ok();
     r.verifiableCredential = { ...r.verifiableCredential, issuer: 'did:key:z6Mkn' };
     add(r, listSignedByAnother());
-    const out = summarise(r);
+    const out = summarise(r, STRICT);
     expect(out.code).toBe('withdrawal_unknown');
     expect(out.detail).toContain('may not be from the issuer');
     expect(out.detail).not.toContain('did:key');
@@ -1614,7 +1639,7 @@ describe('a withdrawal list signed by someone other than the issuer', () => {
     const r = ok();
     set(r, revokedBy(PROBLEM.suspended, 'Credential Suspended'));
     add(r, listSignedByAnother());
-    expect(summarise(r).code).toBe('withdrawal_unknown');
+    expect(summarise(r, STRICT).code).toBe('withdrawal_unknown');
   });
 
   it('is not repeated when it says the credential is clear, either', () => {
@@ -1622,20 +1647,20 @@ describe('a withdrawal list signed by someone other than the issuer', () => {
     // issuer hasn't withdrawn it" would take a stranger's word for it.
     const r = ok();
     add(r, listSignedByAnother());
-    const out = summarise(r);
+    const out = summarise(r, STRICT);
     expect(out.code).toBe('withdrawal_unknown');
     expect(`${out.headline} ${out.detail}`).not.toMatch(/hasn['’]t (?:withdrawn|deactivated)/);
-    expect(row(r, CHECK.status)?.severity).toBe('unchecked');
+    expect(strictRow(r, CHECK.status)?.severity).toBe('unchecked');
     // The case verifier-core reports today, so pin its wording here too.
     expect(out.detail).toContain('The status information we found may not be from the issuer');
-    expect(`${out.detail} ${out.action} ${row(r, CHECK.status)?.value}`).not.toMatch(/\blist(s|ed)?\b/i);
+    expect(`${out.detail} ${out.action} ${strictRow(r, CHECK.status)?.value}`).not.toMatch(/\blist(s|ed)?\b/i);
   });
 
   it("keeps an expired credential's reassurance to the seal", () => {
     const r = ok();
     expire(r);
     add(r, listSignedByAnother());
-    const out = summarise(r);
+    const out = summarise(r, STRICT);
     expect(out.code).toBe('expired');
     expect(out.detail).toBe("It hasn't been tampered with.");
   });
@@ -1870,8 +1895,8 @@ describe('dates nobody checked, though the seal held', () => {
     const r = ok();
     set(r, datesThrew());
     add(r, listSignedByAnother());
-    expect(summarise(r).code).toBe('withdrawal_unknown');
-    expect(summarise(r).action).toContain('know');
+    expect(summarise(r, STRICT).code).toBe('withdrawal_unknown');
+    expect(summarise(r, STRICT).action).toContain('know');
   });
 
   it('yields to a withdrawal, which the issuer has already decided', () => {

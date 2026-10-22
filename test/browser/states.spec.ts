@@ -159,21 +159,35 @@ test("a seal made with someone else's key is not called tampering", async ({ pag
 });
 
 /**
- * Clear on that list. Read on trust, this would be Verified — "the issuer
- * hasn't withdrawn it" — on the word of whoever signed the list, who could
- * as easily have un-withdrawn it.
- *
- * Not tested the other way round: a mark on a stranger's list ends
- * verifier-core's status suite before the signer is compared, so the library
- * reports a plain withdrawal (raised upstream).
+ * A list signed by someone other than the issuer, and clear. Read like the
+ * issuer's own by default (Nate Otto, 22 October 2026: DCC's own status
+ * service signs every list with its own key), so it reads Verified; the
+ * mismatch is the library's warning, in the Developer view. Not a demo button
+ * any more, since it would look exactly like "Not withdrawn".
  */
-test("a withdrawal list the issuer didn't sign is not believed", async ({ page }) => {
-  const c = await pick(page, 'Untrusted list');
-  expect(c.severity).toBe('unchecked');
-  expect(c.headline).toContain("We couldn't check whether this copy is still active");
-  expect(c.detail).toContain('The status information we found may not be from the issuer');
-  expect(c.severity).not.toBe('success');
-  expect(await detailRows(page)).toContainEqual(expect.stringContaining('the information we found may not be from the issuer'));
+test("a withdrawal list the issuer didn't sign is read like theirs, and flagged for developers", async ({ page }) => {
+  await settle(page, async () => {
+    await page.evaluate(async () => {
+      const el = document.getElementById('vc') as HTMLElement & { credential?: unknown; registries?: unknown };
+      const credential = await (await fetch('./fixtures/list-not-issuers.json')).json();
+      el.registries = [
+        { name: 'Local Dev Registry', type: 'dcc-legacy', url: new URL('./fixtures/registry.json', location.href).href },
+      ];
+      el.credential = credential;
+    });
+  });
+  const c = await card(page);
+  expect(c.severity).toBe('success');
+  expect(c.headline).toContain('Verified');
+  expect(c.detail).toContain("the issuer hasn't deactivated it");
+  expect(await detailRows(page)).toContainEqual(expect.stringContaining('not deactivated or on hold'));
+
+  await viewButton(page, 'Developer view').click();
+  const text = await page.evaluate(
+    () => document.getElementById('vc')!.shadowRoot!.querySelector('.dev')!.textContent!.replace(/\s+/g, ' '),
+  );
+  expect(text).toContain('Failed: list-issuer');
+  expect(text).toContain('STATUS_LIST_ISSUER_MISMATCH');
 });
 
 test('an unrecognised issuer is never called fake', async ({ page }) => {
@@ -222,7 +236,7 @@ const rowLayout = (page: Page) =>
     }),
   );
 
-for (const situation of ['Registry offline', 'Untrusted list']) {
+for (const situation of ['Registry offline', 'Not their seal']) {
   test(`each Details mark stays beside its text when the text wraps (${situation})`, async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 900 });
     await pick(page, situation);

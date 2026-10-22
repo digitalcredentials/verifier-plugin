@@ -49,9 +49,26 @@ export interface Check {
  * the issuer was never looked up (see `VerifyOptions`). A lookup that then
  * never answered reads as "our list of known issuers didn't load", which is
  * exactly what happened, rather than the vaguer "we couldn't finish checking".
+ *
+ * `requireIssuerSignedStatusList`: believe a withdrawal list only when the
+ * credential's own issuer signed it. Off, which is the default, a list signed
+ * by someone else is read like any other, as verifier-core does, and the
+ * mismatch shows only in the Developer view as the library's warning.
+ *
+ * Off because DCC's own status service signs every list with its own key
+ * (status-list-lambda), and the batch issuer signs each batch with a fresh
+ * did:key, so their lists never match their credentials' issuer: on, every
+ * one of those reads "we couldn't check whether this copy is still active".
+ * Nate Otto, 22 October 2026: a mismatch is a warning, not recommended
+ * practice, to be shown as one "until we get our productionized issuer
+ * capabilities set up in the next couple months". Turn it on, or make it the
+ * default, once DCC's issuers sign their own lists. Meanwhile we can't notice
+ * a list re-signed by someone else, which for these credentials the check
+ * couldn't tell from the normal case anyway.
  */
 export interface OutcomeOptions {
   registriesUnavailable?: boolean;
+  requireIssuerSignedStatusList?: boolean;
 }
 
 /**
@@ -246,19 +263,33 @@ const anyUnreachable = (check: CheckResult | undefined): boolean =>
   (check?.outcome.status === 'success' && unreachableNames(check).length > 0);
 
 /**
- * Whether the withdrawal list is someone else's.
+ * Whether the withdrawal list is someone else's, and we were asked to care.
  *
  * verifier-core reports it from its own check, after the list has loaded and
- * been read, and leaves the withdrawal check's own result as it was. See
- * PROBLEM.statusListIssuerMismatch for why we repeat neither answer.
+ * been read, and leaves the withdrawal check's own result as it was. With
+ * `requireIssuerSignedStatusList` we repeat neither answer (see
+ * PROBLEM.statusListIssuerMismatch); without it, `believedChecks` drops that
+ * check, so this is false and the list is read like any other.
  *
- * Both halves reach us since 2.0.0-beta.1. A clean pass from a stranger's
- * list reads "we couldn't check", and so now does a *mark* on one: until
- * then the withdrawal check halted on a mark, the signer was never compared,
- * and a stranger's "withdrawn" read as the issuer's (raised 7 October 2026).
+ * Both halves reach us since 2.0.0-beta.1: a clean pass from a stranger's
+ * list, and a *mark* on one. Until then the withdrawal check halted on a
+ * mark, and the signer was never compared (raised 7 October 2026).
  */
 const listNotIssuers = (checks: Map<string, CheckResult>): boolean =>
   hasProblem(checks.get(CHECK.statusListIssuer), PROBLEM.statusListIssuerMismatch);
+
+/**
+ * The checks the headline and the breakdown act on: all of them, less the
+ * list-issuer check unless `requireIssuerSignedStatusList` asks for it. Done
+ * once, here, so the two can't disagree about whose list is believed. The
+ * Developer view reads the library's results directly, so it still shows the
+ * warning either way.
+ */
+const believedChecks = (r: VerificationResponse, options: OutcomeOptions): Map<string, CheckResult> => {
+  const checks = checksById(r);
+  if (!options.requireIssuerSignedStatusList) checks.delete(CHECK.statusListIssuer);
+  return checks;
+};
 
 /**
  * The issuer has actually withdrawn this.
@@ -808,7 +839,7 @@ const dateText = (raw: unknown): string | undefined => {
  * the issuer has already decided.
  */
 export const summarise = (r: VerificationResponse, options: OutcomeOptions = {}): Outcome => {
-  const checks = checksById(r);
+  const checks = believedChecks(r, options);
 
   if (stoppedEarly(r)) {
     // Our codes are ours, and stable. Which of the four core checks failed is
@@ -958,8 +989,9 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
   // green "Verified" whose detail said the issuer had not withdrawn it above
   // a row saying we could not check.
   //
-  // A list signed by someone other than the issuer lands here too, whatever it
-  // said: withdrawn, suspended or clear, it isn't the issuer's word.
+  // With requireIssuerSignedStatusList, a list signed by someone other than
+  // the issuer lands here too, whatever it said: withdrawn, suspended or
+  // clear, it isn't the issuer's word.
   //
   // An unchecked seal outranks all of these: it is the more serious unknown,
   // and verifier-core halts the withdrawal check after it, so "the withdrawal
@@ -1099,7 +1131,7 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
 export const listChecks = (r: VerificationResponse, options: OutcomeOptions = {}): Check[] => {
   if (stoppedEarly(r)) return [];
 
-  const checks = checksById(r);
+  const checks = believedChecks(r, options);
   const issuer = issuerIdentity(r, options);
   const rows: Check[] = [];
 
