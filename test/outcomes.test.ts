@@ -1632,7 +1632,11 @@ describe('a withdrawal list signed by someone other than the issuer, when only t
   it('believes nothing when there is no check of the list\'s signer at all', () => {
     const r = ok();
     set(r, revokedBy(PROBLEM.revoked, 'Credential Revoked'));
-    expect(summarise(r, STRICT).code).toBe('withdrawal_unknown');
+    const out = summarise(r, STRICT);
+    expect(out.code).toBe('withdrawal_unknown');
+    expect(out.detail).toContain("we couldn't finish that check");
+    expect(out.detail).not.toContain('may not be from the issuer');
+    expect(strictRow(r, CHECK.status)).toMatchObject({ severity: 'unchecked', value: 'not checked' });
   });
 
   // A mismatch on a list that marked the credential arrives since

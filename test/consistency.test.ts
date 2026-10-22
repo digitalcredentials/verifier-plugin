@@ -157,6 +157,9 @@ type Val = 'in_date' | 'expired' | 'not_yet_valid' | 'errored' | 'halted' | 'mis
  * `+other`: the list loaded and was read, but the issuer didn't sign it — the
  * status check's own result is untouched, and a second check reports it,
  * after a mark as well as after a pass since 2.0.0-beta.1.
+ * `+errored`: the list was read, but the check comparing its signer threw,
+ * so nothing is confirmed either way. Not the same as `+other`: strict, it
+ * reads "we couldn't finish that check", not "may not be from the issuer".
  */
 type Rev =
   | 'passed'
@@ -167,6 +170,7 @@ type Rev =
   | 'suspended+other'
   | 'passed+errored'
   | 'revoked+errored'
+  | 'suspended+errored'
   | 'list_error'
   | 'none'
   | 'unreadable'
@@ -207,6 +211,7 @@ const REVOCATIONS: Rev[] = [
   'suspended+other',
   'passed+errored',
   'revoked+errored',
+  'suspended+errored',
   'list_error',
   'none',
   'unreadable',
@@ -358,6 +363,8 @@ const revocationCheck = (rev: Rev): CheckResult | undefined => {
       return revocationCheck('passed');
     case 'revoked+errored':
       return revocationCheck('revoked');
+    case 'suspended+errored':
+      return revocationCheck('suspended');
     case 'halted':
       return check(CHECK.status, { status: 'skipped', reason: NOT_RUN });
     case 'suspended':
@@ -670,6 +677,20 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
       expect(`${out.headline} ${out.detail}`, `${where}: believed a list the issuer didn't sign`).not.toMatch(
         /hasn['’]t (?:withdrawn|deactivated)/,
       );
+      // ...and says why in the right words: a stranger's list is "may not be
+      // from the issuer"; a signer nobody could confirm is an unfinished
+      // check, not a stranger, and retrying may well work.
+      const stranger = rev.endsWith('+other');
+      if (out.code === 'withdrawal_unknown') {
+        expect(out.detail, `${where}: the wrong reason`).toMatch(
+          stranger ? /may not be from the issuer/ : /couldn't finish that check/,
+        );
+      }
+      if (row(CHECK.signature)?.severity === 'success') {
+        expect(row(CHECK.status)?.value, `${where}: the wrong Status row`).toBe(
+          stranger ? "couldn't check — the information we found may not be from the issuer" : 'not checked',
+        );
+      }
     }
 
     // A clean verdict cannot sit above a row reporting a problem.
