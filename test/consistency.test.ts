@@ -165,6 +165,8 @@ type Rev =
   | 'passed+other'
   | 'revoked+other'
   | 'suspended+other'
+  | 'passed+errored'
+  | 'revoked+errored'
   | 'list_error'
   | 'none'
   | 'unreadable'
@@ -203,6 +205,8 @@ const REVOCATIONS: Rev[] = [
   'passed+other',
   'revoked+other',
   'suspended+other',
+  'passed+errored',
+  'revoked+errored',
   'list_error',
   'none',
   'unreadable',
@@ -350,6 +354,10 @@ const revocationCheck = (rev: Rev): CheckResult | undefined => {
       return revocationCheck('revoked');
     case 'suspended+other':
       return revocationCheck('suspended');
+    case 'passed+errored':
+      return revocationCheck('passed');
+    case 'revoked+errored':
+      return revocationCheck('revoked');
     case 'halted':
       return check(CHECK.status, { status: 'skipped', reason: NOT_RUN });
     case 'suspended':
@@ -523,9 +531,17 @@ const build = (sig: Sig, val: Val, rev: Rev, end: End, iss: Iss, sch: Sch): Veri
     validityCheck(val),
     revocationCheck(rev),
     // The library compares the list's signer for every list it read, and
-    // reports a pass for the issuer's own.
-    ['passed', 'revoked', 'suspended'].includes(rev)
+    // reports a pass for the issuer's own. `+errored`: the comparison itself
+    // threw, so it confirms nothing either way.
+    ISSUERS_OWN_LIST.includes(rev)
       ? check(CHECK.statusListIssuer, { status: 'success', message: 'The status list was issued by the credential issuer.' })
+      : rev.endsWith('+errored')
+      ? check(CHECK.statusListIssuer, {
+          status: 'failure',
+          problems: [
+            { type: 'https://www.w3.org/TR/vc-data-model#CHECK_ERROR', title: 'Check Error', detail: 'Check "status.list-issuer" threw: x' },
+          ],
+        })
       : rev.endsWith('+other')
       ? check(CHECK.statusListIssuer, {
           status: 'failure',
@@ -566,12 +582,16 @@ const HOST_LIST: ('loaded' | 'unavailable')[] = ['loaded', 'unavailable'];
  * Whose withdrawal lists are believed. `any` is the default; `issuers` is
  * `requireIssuerSignedStatusList`, the stricter rule kept for when DCC's
  * issuers sign their own lists. Every list that was read runs both ways: a
- * list someone else signed, where it matters, and the issuer's own, where it
- * must change nothing.
+ * list someone else signed, or whose signer couldn't be confirmed, where it
+ * matters, and the issuer's own, where it must change nothing.
  */
 type Lists = 'any' | 'issuers';
+/** Lists the issuer signed, as the library reports them: read, and the signer confirmed. */
+const ISSUERS_OWN_LIST: Rev[] = ['passed', 'revoked', 'suspended'];
+/** Lists read, whose signer the library reported as someone else, or couldn't confirm. */
+const notConfirmedOwn = (rev: Rev): boolean => rev.endsWith('+other') || rev.endsWith('+errored');
 const listsFor = (rev: Rev): Lists[] =>
-  rev.endsWith('+other') || ['passed', 'revoked', 'suspended'].includes(rev) ? ['any', 'issuers'] : ['any'];
+  ISSUERS_OWN_LIST.includes(rev) || notConfirmedOwn(rev) ? ['any', 'issuers'] : ['any'];
 
 /**
  * A check is only ever skipped as "not run" because one before it failed
@@ -627,15 +647,15 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
     // By default a list someone else signed is read like the issuer's own:
     // the same headline and the same rows as without the mismatch, whatever
     // the list said and whatever else happened.
-    if (lists === 'any' && rev.endsWith('+other')) {
-      const own = build(sig, val, rev.replace('+other', '') as Rev, end, iss, sch);
+    if (lists === 'any' && notConfirmedOwn(rev)) {
+      const own = build(sig, val, rev.replace(/\+(other|errored)$/, '') as Rev, end, iss, sch);
       expect(out, `${where}: reads differently from the issuer's own list`).toEqual(summarise(own, options));
       expect(rows, `${where}: rows differ from the issuer's own list`).toEqual(listChecks(own, options));
     }
 
     // With only the issuer's own lists believed, the issuer's own reads just
     // as it does by default.
-    if (lists === 'issuers' && !rev.endsWith('+other')) {
+    if (lists === 'issuers' && ISSUERS_OWN_LIST.includes(rev)) {
       const loose = { ...options, requireIssuerSignedStatusList: false };
       expect(out, `${where}: refused the issuer's own list`).toEqual(summarise(r, loose));
       expect(rows, `${where}: refused the issuer's own list`).toEqual(listChecks(r, loose));
@@ -644,7 +664,7 @@ describe(`the headline and the breakdown agree (${cases.length} combinations)`, 
     // With only the issuer's own lists believed, a list someone else signed
     // settles nothing either way: not "deactivated", not "on hold", not "the
     // issuer hasn't deactivated it".
-    if (lists === 'issuers' && rev.endsWith('+other')) {
+    if (lists === 'issuers' && notConfirmedOwn(rev)) {
       expect(['withdrawn', 'suspended'], `${where}: believed a list the issuer didn't sign`).not.toContain(out.code);
       expect(row(CHECK.status)?.severity, `${where}: the Status row believed a list the issuer didn't sign`).toBe('unchecked');
       expect(`${out.headline} ${out.detail}`, `${where}: believed a list the issuer didn't sign`).not.toMatch(

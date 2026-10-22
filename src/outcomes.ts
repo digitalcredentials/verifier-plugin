@@ -290,9 +290,12 @@ const listNotIssuers = (checks: Map<string, CheckResult>): boolean =>
  * By default, all of them less the list-issuer check, so a list is read
  * whoever signed it. With `requireIssuerSignedStatusList`, a list that was
  * read (it passed, or marked the credential) is believed only when the
- * list-issuer check passed: one that errored, was skipped or is missing
- * confirms nothing, and counts as someone else's, rather than as the issuer's
- * by default.
+ * list-issuer check passed. A reported mismatch is someone else's list, and
+ * says so. A check of the signer that errored, was skipped or is missing
+ * confirms nothing either way, so the withdrawal check's answer is set aside,
+ * as if it hadn't finished: "we couldn't finish that check", which is true,
+ * rather than the issuer's word by default or a stranger's by guess. Nothing
+ * is added: the map only ever holds what the library reported.
  */
 const believedChecks = (r: VerificationResponse, options: OutcomeOptions): Map<string, CheckResult> => {
   const checks = checksById(r);
@@ -301,22 +304,10 @@ const believedChecks = (r: VerificationResponse, options: OutcomeOptions): Map<s
     return checks;
   }
   const status = checks.get(CHECK.status);
+  const signer = checks.get(CHECK.statusListIssuer);
   const listRead = passed(status) || hasProblem(status, PROBLEM.revoked) || hasProblem(status, PROBLEM.suspended);
-  if (listRead && !passed(checks.get(CHECK.statusListIssuer))) {
-    checks.set(CHECK.statusListIssuer, {
-      id: CHECK.statusListIssuer,
-      suite: 'status',
-      outcome: {
-        status: 'failure',
-        problems: [
-          {
-            type: PROBLEM.statusListIssuerMismatch,
-            title: 'Status List Issuer Not Confirmed',
-            detail: "The library didn't confirm that the credential's issuer signed its status list.",
-          },
-        ],
-      },
-    });
+  if (listRead && !passed(signer) && !hasProblem(signer, PROBLEM.statusListIssuerMismatch)) {
+    checks.delete(CHECK.status);
   }
   return checks;
 };

@@ -1613,15 +1613,20 @@ describe('a withdrawal list signed by someone other than the issuer, when only t
   });
 
   it.each([
-    ['errored', () => fail(CHECK.statusListIssuer, [{ type: 'https://www.w3.org/TR/vc-data-model#CHECK_ERROR', title: 'Check Error', detail: 'x' }])],
-    ['was skipped', () => skip(CHECK.statusListIssuer, 'No status list was checked.')],
-  ])('believes nothing when the check of the list\'s signer %s', (_, listIssuer) => {
-    // Fail closed: an unconfirmed signer is not the issuer's by default.
+    ['came back clear', () => pass(CHECK.status, 'Credential status is valid (not revoked or suspended).')],
+    ['says deactivated', () => revokedBy(PROBLEM.revoked, 'Credential Revoked')],
+    ['says on hold', () => revokedBy(PROBLEM.suspended, 'Credential Suspended')],
+  ])('believes nothing, and says it couldn\'t finish, when the list %s but its signer check errored', (_, status) => {
+    // Fail closed, and say what happened: the signer is unknown, not a
+    // stranger, so not the stranger's-list wording either.
     const r = ok();
-    add(r, listIssuer());
+    set(r, status());
+    add(r, fail(CHECK.statusListIssuer, [{ type: 'https://www.w3.org/TR/vc-data-model#CHECK_ERROR', title: 'Check Error', detail: 'x' }]));
     const out = summarise(r, STRICT);
     expect(out.code).toBe('withdrawal_unknown');
-    expect(`${out.headline} ${out.detail}`).not.toMatch(/hasn['’]t (?:withdrawn|deactivated)/);
+    expect(out.detail).toContain("we couldn't finish that check");
+    expect(out.detail).not.toContain('may not be from the issuer');
+    expect(strictRow(r, CHECK.status)).toMatchObject({ severity: 'unchecked', value: 'not checked' });
   });
 
   it('believes nothing when there is no check of the list\'s signer at all', () => {
