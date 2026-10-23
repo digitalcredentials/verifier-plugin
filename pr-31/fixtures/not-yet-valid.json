@@ -39,9 +39,9 @@
   },
   "proof": {
     "type": "Ed25519Signature2020",
-    "created": "2026-10-22T18:27:50Z",
+    "created": "2026-10-23T21:13:17Z",
     "verificationMethod": "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z#z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z",
     "proofPurpose": "assertionMethod",
-    "proofValue": "z3N9rs7AnB7tAndhWZo7LSVQZ6DgkdsFtwSQNyDh2h2Xk1yCyPBcNWsAowYmnMW9xa3NUt5h8qKqobR1RzUUB3NY2"
+    "proofValue": "z27AW1nAj9GtEe7GpNxJpHTDZCU7ABabchxC5U6rnqjrH2aQTbDG3rxAM8YXpcbYcyfNbJsLbwMyppVEoRPQ4Cq35"
   }
 }
