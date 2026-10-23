@@ -782,7 +782,7 @@ const UNCHECKED_SIGNATURE: Omit<Outcome, 'code'> = {
  * reporting that the very thing it asserted had never been checked.
  *
  * So it is assembled from what reported, and returns nothing at all rather
- * than anything unearned. `test/consistency.test.ts` asserts the claim
+ * than anything unearned. The consistency suite asserts the claim
  * against the rows, in prose, because severities cannot see this: both
  * sides read "unchecked" and agree perfectly while the sentence lies.
  *

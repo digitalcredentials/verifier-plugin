@@ -251,7 +251,9 @@ A first slice: a real credential in, real verification, one card out.
 | `test/outcomes.test.ts` | The mapping, and the ways a good credential can be made to look bad |
 | `test/fixtures.test.ts` | The demo's credentials are well-formed Open Badges, apart from the one built wrong on purpose |
 | `test/did-web-outages.test.ts` | An issuer's website that won't serve its key reads as unreachable, not tampered (verifier-core#65, fixed in 2.0.0-beta.1) |
-| `test/consistency.test.ts` | 38,880 combinations asserting the headline and the breakdown can never disagree |
+| `test/consistency-combinations.ts` | Every combination of check results, and the rules by which the headline and the breakdown can never disagree |
+| `test/consistency-1.test.ts` … `-4` | Those rules, over a quarter of the combinations each: as one file they ran past Vitest's 60-second limit on a slow CI machine |
+| `test/consistency.test.ts` | The claim patterns themselves, a nameless issuer across every combination, verification that stopped early, and a check that every part above has its file |
 | `test/browser/states.spec.ts` | Drives the component in a real browser, locally or against a published copy |
 | `test/browser/link.spec.ts` | The demo page opened from a link to a credential |
 | `test/browser/support.ts` | Page setup both browser specs share |
@@ -310,10 +312,12 @@ found across four reviews of the first two pull requests, and six were that —
 a clean verdict above a row reporting a problem, or a headline claiming in
 prose what the breakdown said was never checked.
 
-`test/consistency.test.ts` walks 1,500 combinations and asserts both: that the
-severities agree, and that no verdict claims the credential is unchanged or
-not withdrawn unless the row it rests on actually reported. Run it if you
-touch either function.
+The consistency suite (`test/consistency-combinations.ts`, run in parts by
+`test/consistency-*.test.ts`) walks every combination of check results and
+asserts both: that the severities agree, and that no verdict claims the
+credential is unchanged or not withdrawn unless the row it rests on actually
+reported. Run it (`npx vitest run test/consistency`) if you touch either
+function.
 
 Two rules fall out of it, both learned the hard way:
 

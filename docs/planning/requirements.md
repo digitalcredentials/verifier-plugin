@@ -433,7 +433,7 @@ hasn't been tampered with", when the signature held), and what to do, in
 plain words: "We couldn't check this right now. Something went wrong while
 we were checking, so we can't tell you yet whether it's valid. Try again in
 a little while." Friendly, but never comforting about what we don't know.
-consistency.test.ts holds every verdict to this.
+The consistency suite holds every verdict to this.
 
 The advice has to match the cause, though. For a **withdrawn** credential the
 issuer already made their decision, so the useful advice is to ask for a
