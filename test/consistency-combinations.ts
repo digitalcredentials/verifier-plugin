@@ -5,8 +5,8 @@ import type { VerificationResponse, CheckResult } from '../src/types.js';
 
 /**
  * How a verdict says the credential is unchanged, or not withdrawn — one list,
- * used by every check below, so a phrasing caught in one place is caught in
- * all of them.
+ * used by every check below and in consistency.test.ts, so a phrasing caught
+ * in one place is caught in all of them.
  *
  * Broad on purpose: a reassurance reworded to echo the Tampering row ("no
  * tampering detected") is still a reassurance. The old "changed since it was
@@ -442,7 +442,7 @@ const schemaCheck = (sch: Sch): CheckResult | undefined => {
 export const build = (sig: Sig, val: Val, rev: Rev, end: End, iss: Iss, sch: Sch): VerificationResponse => {
   const results = [
     // The four core checks pass throughout: a failure among them is
-    // "it stopped", which has its own describe block below.
+    // "it stopped", which has its own describe block in consistency.test.ts.
     check(CHECK.contextExists, { status: 'success', message: 'ok' }, true),
     check(CHECK.vcContext, { status: 'success', message: 'ok' }, true),
     check(CHECK.credentialId, { status: 'success', message: 'ok' }, true),
@@ -554,16 +554,35 @@ export const cases = SIGNATURES.flatMap((sig) =>
 const DATES_ROW = CHECK.validityPeriod;
 
 /**
+ * Open Badges 3.0 requires an issuer's id and type, not its name, so a genuine
+ * credential can give no name at all. The verdict then says "the issuer":
+ * "Ask did:key:z6Mk… for a current copy" isn't something the earner can act
+ * on. The Issuer row may show the identifier; it is labelled, not a sentence.
+ */
+const NAMELESS: [string, unknown][] = [
+  ['only an identifier', 'did:key:z6Mkn'],
+  ['an identifier and no name', { id: 'did:key:z6Mkn' }],
+  ['an empty name', { id: 'did:key:z6Mkn', name: '' }],
+  ['a blank name', { id: 'did:key:z6Mkn', name: '  ' }],
+  ['neither a name nor an identifier', {}],
+];
+
+/**
  * Run in parts, one file each (consistency-1.test.ts onwards), each taking
  * every PARTS-th combination. Vitest fails any one test file that runs past
  * 60 seconds, whatever its results ("Timeout calling onTaskUpdate"), and a
  * CI machine can run this three times slower than a laptop: as one file it
  * passed in 34 s on one run and failed at 70 s on the next (22 October
- * 2026). consistency.test.ts checks that every part has its file.
+ * 2026). Its own per-test limit is 5 seconds, so the nameless-issuer check,
+ * which loops over the combinations inside each test, is split too. Each
+ * part takes its number from its file's name, so no two files can run the
+ * same part; consistency.test.ts checks that every part has its file.
  */
 export const PARTS = 4;
 
-export const agreementTests = (part: number): void => {
+export const agreementTests = (file: string): void => {
+  const part = Number(/\/consistency-([1-9]\d*)\.test\.ts$/.exec(file)?.[1]);
+  if (!(part >= 1 && part <= PARTS)) throw new Error(`${file} is not one of consistency-1.test.ts to -${PARTS}`);
   const slice = cases.filter((_, i) => i % PARTS === part - 1);
   describe(`the headline and the breakdown agree (part ${part} of ${PARTS}: ${slice.length} of ${cases.length} combinations)`, () => {
     it.each(slice)('$name', ({ sig, val, rev, end, iss, sch, list, lists, name }) => {
@@ -829,6 +848,20 @@ export const agreementTests = (part: number): void => {
       // because nothing is wrong and there is nothing to fix.
       if (out.severity !== 'success' && out.code !== 'issuer_unconfirmed') {
         expect(out.action, `${where}: no action offered`).toBeTruthy();
+      }
+    });
+  });
+
+  describe(`an issuer with no name is never addressed by its identifier (part ${part} of ${PARTS}: ${slice.length} combinations each)`, () => {
+    it.each(NAMELESS)('%s', (_, issuer) => {
+      for (const { sig, val, rev, end, iss, sch, list, lists, name } of slice) {
+        const r = build(sig, val, rev, end, iss, sch);
+        r.verifiableCredential = { ...r.verifiableCredential, issuer };
+        const out = summarise(r, { registriesUnavailable: list === 'unavailable', requireIssuerSignedStatusList: lists === 'issuers' });
+        // Two spaces in a row: an empty name dropped into a sentence.
+        for (const sentence of [out.headline, out.detail, out.action ?? '']) {
+          expect(sentence, `${name} → ${out.code}`).not.toMatch(/did:|Unknown issuer|\s\s/);
+        }
       }
     });
   });

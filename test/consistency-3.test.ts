@@ -1,3 +1,3 @@
 import { agreementTests } from './consistency-combinations.js';
 
-agreementTests(3);
+agreementTests(import.meta.url);

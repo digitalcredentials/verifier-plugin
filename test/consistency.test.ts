@@ -9,7 +9,6 @@ import {
   LEANS_POSITIVE,
   PARTS,
   build,
-  cases,
   check,
 } from './consistency-combinations.js';
 
@@ -103,7 +102,8 @@ describe('the claim patterns themselves', () => {
 /**
  * The headline and the breakdown are held to each other across every
  * combination in consistency-combinations.ts, a part per file. A part whose
- * file went missing would drop its share of them without a sound.
+ * file went missing would drop its share of them without a sound. (A file
+ * can't run the wrong part: each takes its number from its own name.)
  */
 describe('the consistency suite', () => {
   it(`runs all ${PARTS} parts of the combinations`, () => {
@@ -112,36 +112,8 @@ describe('the consistency suite', () => {
   });
 });
 
-/**
- * Open Badges 3.0 requires an issuer's id and type, not its name, so a genuine
- * credential can give no name at all. The verdict then says "the issuer":
- * "Ask did:key:z6Mk… for a current copy" isn't something the earner can act
- * on. The Issuer row may show the identifier; it is labelled, not a sentence.
- */
-const NAMELESS: [string, unknown][] = [
-  ['only an identifier', 'did:key:z6Mkn'],
-  ['an identifier and no name', { id: 'did:key:z6Mkn' }],
-  ['an empty name', { id: 'did:key:z6Mkn', name: '' }],
-  ['a blank name', { id: 'did:key:z6Mkn', name: '  ' }],
-  ['neither a name nor an identifier', {}],
-];
-
-describe(`an issuer with no name is never addressed by its identifier (${cases.length} combinations each)`, () => {
-  it.each(NAMELESS)('%s', (_, issuer) => {
-    for (const { sig, val, rev, end, iss, sch, list, lists, name } of cases) {
-      const r = build(sig, val, rev, end, iss, sch);
-      r.verifiableCredential = { ...r.verifiableCredential, issuer };
-      const out = summarise(r, { registriesUnavailable: list === 'unavailable', requireIssuerSignedStatusList: lists === 'issuers' });
-      // Two spaces in a row: an empty name dropped into a sentence.
-      for (const sentence of [out.headline, out.detail, out.action ?? '']) {
-        expect(sentence, `${name} → ${out.code}`).not.toMatch(/did:|Unknown issuer|\s\s/);
-      }
-    }
-  });
-});
-
 describe('a credential that is both withdrawn and expired', () => {
-  // The contradiction the 2.x migration introduced and this file exists to
+  // The contradiction the 2.x migration introduced and this suite exists to
   // catch: expiry moved ahead of withdrawal, so the headline was a warning
   // about renewal while the breakdown reported an error.
   it('reports the withdrawal, because the issuer has already decided', () => {
@@ -193,8 +165,9 @@ describe('verification that stopped early', () => {
     expect(out.detail).toBeTruthy();
     expect(out.action, `${code} offers no action`).toBeTruthy();
     expect(['error', 'unchecked']).toContain(out.severity);
-    // With no breakdown, the claim check above has no rows to hold the prose
-    // to, so hold it to nothing: a verdict that stopped here cannot reassure.
+    // With no breakdown, the claim check in consistency-combinations.ts has
+    // no rows to hold the prose to, so hold it to nothing: a verdict that
+    // stopped here cannot reassure.
     const claims = `${out.headline} ${out.detail}`.toLowerCase();
     expect(claims, `${code} reassures with nothing behind it`).not.toMatch(CLAIMS_UNCHANGED);
     expect(claims, `${code} reassures with nothing behind it`).not.toMatch(CLAIMS_NOT_WITHDRAWN);
