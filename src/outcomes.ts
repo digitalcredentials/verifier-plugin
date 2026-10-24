@@ -67,6 +67,13 @@ export interface Check {
  * a list re-signed by someone else, which for these credentials the check
  * couldn't tell from the normal case anyway.
  *
+ * Before turning it on: the library's check of the signer gives one answer
+ * for all of a credential's lists, so where a credential has two, one the
+ * issuer's and one someone else's, the mismatch sets both aside. An issuer's
+ * own "deactivated" then reads "we couldn't check whether this copy is still
+ * active": cautious, not wrong, but not what the issuer's list says (found
+ * in review, 24 October 2026).
+ *
  * Not a property of <verifier-credential>: no host needs to choose this, and
  * switching back is ours to do, by changing the default here.
  */
@@ -319,8 +326,10 @@ const believedChecks = (r: VerificationResponse, options: OutcomeOptions): Map<s
  * fails when the list would not load, had expired, or did not verify, and none
  * of those establish anything about the credential. Reporting one of them as a
  * withdrawal would be the gravest false claim this component could make, and
- * in 1.x only the absence of any distinction kept us from it. A list signed by
- * someone other than the issuer establishes nothing either.
+ * in 1.x only the absence of any distinction kept us from it. With
+ * `requireIssuerSignedStatusList`, a list signed by someone other than the
+ * issuer establishes nothing either; by default it is read like the issuer's
+ * own (see `believedChecks`).
  */
 const isWithdrawn = (checks: Map<string, CheckResult>): boolean =>
   hasProblem(checks.get(CHECK.status), PROBLEM.revoked) && !listNotIssuers(checks);
@@ -334,8 +343,9 @@ const isSuspended = (checks: Map<string, CheckResult>): boolean =>
   hasProblem(checks.get(CHECK.status), PROBLEM.suspended) && !listNotIssuers(checks);
 
 /**
- * The withdrawal list loaded, is the issuer's own, and doesn't list this. The
- * only grounds for saying the issuer hasn't withdrawn it.
+ * The withdrawal list loaded, is believed (by default whoever signed it; with
+ * `requireIssuerSignedStatusList`, only the issuer's own), and doesn't list
+ * this. The only grounds for saying the issuer hasn't withdrawn it.
  */
 const notWithdrawn = (checks: Map<string, CheckResult>): boolean =>
   passed(checks.get(CHECK.status)) && !listNotIssuers(checks);

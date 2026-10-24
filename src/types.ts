@@ -122,8 +122,11 @@ export const CHECK = {
   validityPeriod: 'cryptographic.proof.validity-period',
   status: 'cryptographic.status.bitstring',
   /**
-   * Whether the withdrawal list was signed by the credential's own issuer.
-   * Runs after `status`, and only for lists that loaded.
+   * Whether the credential's status lists were signed by its own issuer: one
+   * answer for all of them. Runs after `status` whenever a list was checked,
+   * and compares only lists whose signature it can establish. Fails if any
+   * one is someone else's; skipped if any couldn't be established and none
+   * was someone else's.
    */
   statusListIssuer: 'cryptographic.status.list-issuer',
   registeredIssuer: 'trust.registry.issuer',
@@ -162,8 +165,9 @@ export const PROBLEM = {
   registryUnchecked: 'https://www.w3.org/TR/vc-data-model#REGISTRY_UNCHECKED',
   schemaValidationFailed: 'https://www.w3.org/TR/vc-data-model#SCHEMA_VALIDATION_FAILED',
   /**
-   * The status list says so. The only thing that means "withdrawn" — and only
-   * while the list is the issuer's own (see `statusListIssuerMismatch`).
+   * The status list says so. The only thing that means "withdrawn" — with
+   * `requireIssuerSignedStatusList`, only while the list is the issuer's own
+   * (see `statusListIssuerMismatch`).
    */
   revoked: 'https://www.w3.org/TR/vc-data-model#CREDENTIAL_REVOKED',
   /** As `revoked`, for the suspension bit: possibly temporary. */

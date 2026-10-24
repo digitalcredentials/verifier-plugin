@@ -252,7 +252,7 @@ A first slice: a real credential in, real verification, one card out.
 | `test/fixtures.test.ts` | The demo's credentials are well-formed Open Badges, apart from the one built wrong on purpose |
 | `test/did-web-outages.test.ts` | An issuer's website that won't serve its key reads as unreachable, not tampered (verifier-core#65, fixed in 2.0.0-beta.1) |
 | `test/consistency-combinations.ts` | Every combination of check results, and the rules by which the headline and the breakdown can never disagree |
-| `test/consistency-1.test.ts` … `-4` | Those rules, and that a nameless issuer is never addressed by its identifier, over a quarter of the combinations each: as one file they ran past Vitest's 60-second limit on a slow CI machine |
+| `test/consistency-1.test.ts` … `-4` | Those rules, and that a nameless issuer is never addressed by its identifier, over a quarter of the combinations each, so the files run side by side. A pause after each test keeps Vitest's 60-second limit from failing a long file on a slow CI machine |
 | `test/consistency.test.ts` | The claim patterns themselves, a credential both withdrawn and expired, verification that stopped early, and a check that every part above has its file |
 | `test/browser/states.spec.ts` | Drives the component in a real browser, locally or against a published copy |
 | `test/browser/link.spec.ts` | The demo page opened from a link to a credential |
