@@ -642,9 +642,9 @@ export const agreementTests = (file: string): void => {
             stranger ? /^Let .+ know we couldn't check whether this copy is still active\.$/ : /^Try again in a little while\.$/,
           );
         }
-        // Only behind a seal that held: behind a broken one the Status row
-        // should be about the seal, not the list. verifier-plugin#32 is that
-        // fix, making it "not checked" whatever the list said.
+        // Only behind a seal that held: behind a broken one the Status row is
+        // about the seal and reads "not checked" whatever the list said
+        // (verifier-plugin#32), as asserted below with the Dates row.
         if (row(CHECK.signature)?.severity === 'success') {
           expect(row(CHECK.status)?.value, `${where}: the wrong Status row`).toBe(
             stranger ? "couldn't check — the information we found may not be from the issuer" : 'not checked',

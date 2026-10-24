@@ -609,6 +609,15 @@ describe('an action names the issuer only when the seal held', () => {
     expect(listChecks(r).find((c) => c.id === CHECK.status)).toMatchObject({ severity: 'unchecked', value: 'not checked' });
   });
 
+  it('believes no hold when the seal never reported', () => {
+    // As for a withdrawal, the same for a hold.
+    const r = ok();
+    set(r, revokedBy(PROBLEM.suspended, 'Credential Suspended'));
+    remove(r, CHECK.signature);
+    expect(summarise(r).code).toBe('signature_unchecked');
+    expect(listChecks(r).find((c) => c.id === CHECK.status)).toMatchObject({ severity: 'unchecked', value: 'not checked' });
+  });
+
   it.each([
     ['only an identifier', 'did:key:z6Mkn'],
     ['an identifier and no name', { id: 'did:key:z6Mkn' }],
@@ -1926,9 +1935,13 @@ describe('the Status row behind a seal that did not hold', () => {
     ['says deactivated', () => revokedBy(PROBLEM.revoked, 'Credential Revoked')],
     ['says on hold', () => revokedBy(PROBLEM.suspended, 'Credential Suspended')],
   ])('reads "not checked" when the seal is tampered and the list %s', (_, status) => {
-    // The row's own guard, whatever the list said. The guards on believing a
-    // withdrawal or a hold are pinned by "believes no withdrawal when the
-    // seal never reported" and by the consistency suite.
+    // "Not checked" whatever the list said. Either the row's own guard or the
+    // matching predicate's is enough to pass these: notWithdrawn's for a list
+    // that came back clear, isWithdrawn's and isSuspended's for the other two.
+    // The row's guard alone is pinned by the "no list" cases above;
+    // isWithdrawn's and isSuspended's by "believes no withdrawal" and
+    // "believes no hold when the seal never reported". notWithdrawn's can't
+    // be pinned alone (see its docblock).
     const r = ok();
     set(r, tamperedSignature());
     set(r, status());
