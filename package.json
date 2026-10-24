@@ -38,7 +38,7 @@
     "@digitalcredentials/security-document-loader": "^6.0.0",
     "@digitalcredentials/vc": "^9.0.1",
     "@digitalcredentials/vc-bitstring-status-list": "^1.0.0",
-    "@digitalcredentials/verifier-core": "github:digitalcredentials/verifier-core#d217b042371096e84b8cd0046fbe79a667683d8a",
+    "@digitalcredentials/verifier-core": "2.0.0-beta.1",
     "@playwright/test": "^1.63.0",
     "@types/react": "^19.3.0",
     "oxlint": "^1.75.0",

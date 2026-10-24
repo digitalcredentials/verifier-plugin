@@ -44,40 +44,37 @@ export interface ProblemDetail {
  */
 export type CheckOutcome =
   | { status: 'success'; message: string; payload?: unknown }
-  | { status: 'failure'; problems: ProblemDetail[] }
+  | { status: 'failure'; problems: ProblemDetail[]; payload?: unknown }
   | { status: 'skipped'; reason: string };
 
 export interface CheckResult {
-  /**
-   * `<phase>.<suite>.<localPart>`. Optional in the library's declarations for
-   * backwards compatibility with hand-built literals, so the fallback below is
-   * not defensive padding — `id` really can be absent.
-   */
-  id?: string;
-  /** @deprecated by the library in favour of `id`; still the fallback. */
-  check: string;
-  /** @deprecated by the library in favour of `id`; still the fallback. */
+  /** `<phase>.<suite>.<localPart>`, on every row. The one thing to match on. */
+  id: string;
   suite: string;
   outcome: CheckOutcome;
   /** Set when the check was marked fatal in its suite definition. */
   fatal?: boolean;
+  /**
+   * `false` on a fatal check whose failure leaves the checks after it
+   * running: validity dates and status. Absent, a fatal failure halts.
+   */
+  halts?: boolean;
 }
 
 /**
- * Per-suite rollup. Always present, whatever `verbose` is set to.
+ * Per-suite rollup.
  *
  * We do not read it for the verdict, and the reason is worth recording: its
  * `counts` are per suite, not per check, so in any suite with more than one
  * check it cannot tell you *which* check passed. That is precisely the
  * distinction this component exists to get right, so the verdict is built from
- * `results[]` with `verbose: true` instead. See verify.ts.
+ * `results[]`, which lists every check that ran, was skipped, or was not run.
  */
 export interface SuiteSummary {
   id: string;
   phase: string;
   suite: string;
   status: 'success' | 'failure' | 'skipped' | 'mixed';
-  verified: boolean;
   message: string;
   counts: { passed: number; failed: number; skipped: number };
   fatalFailureAt?: string;
@@ -116,6 +113,13 @@ export const CHECK = {
   credentialId: 'cryptographic.core.credential-id',
   proofExists: 'cryptographic.core.proof-exists',
   signature: 'cryptographic.proof.signature',
+  /**
+   * The credential's own dates against the library's clock. Runs only once
+   * the signature has verified, so a failure here is a genuine credential
+   * that has run out or hasn't started. Fatal, but it doesn't halt: the
+   * withdrawal list and the issuer lookup are still read.
+   */
+  validityPeriod: 'cryptographic.proof.validity-period',
   status: 'cryptographic.status.bitstring',
   /**
    * Whether the withdrawal list was signed by the credential's own issuer.
@@ -136,9 +140,9 @@ export const PROBLEM = {
    */
   invalidSignature: 'https://www.w3.org/TR/vc-data-model#INVALID_SIGNATURE',
   /**
-   * The seal held, and the end date has passed. @digitalcredentials/vc reads
-   * dates only after the proof verifies, so this is evidence the credential
-   * is genuine, not a doubt about it.
+   * The seal held, and the end date has passed. Reported by the validity
+   * period check, which runs only after the signature verified, so this is
+   * evidence the credential is genuine, not a doubt about it.
    */
   credentialExpired: 'https://www.w3.org/TR/vc-data-model#CREDENTIAL_EXPIRED',
   /** As above, for a start date still in the future. */
@@ -168,9 +172,11 @@ export const PROBLEM = {
    * The withdrawal list was signed by someone other than the credential's
    * issuer. verifier-core reports it as a warning and leaves `verified` alone,
    * because some status services sign every list with their own DID, and says
-   * consumers who need the binding should treat it as decisive. We do: whoever
+   * consumers who need the binding should treat it as decisive. Whoever
    * controls the list's host could otherwise mark a credential withdrawn, or
-   * un-withdraw it, so its answer is not ours to repeat either way.
+   * un-withdraw it. We treat it as decisive only with
+   * `requireIssuerSignedStatusList`, off for now because DCC's own status
+   * service is one of those services: see OutcomeOptions.
    */
   statusListIssuerMismatch: 'https://www.w3.org/TR/vc-data-model#STATUS_LIST_ISSUER_MISMATCH',
 } as const;
@@ -189,20 +195,24 @@ export const STATUS_LIST_PROBLEM_PREFIX =
   'https://www.w3.org/TR/vc-data-model#STATUS_LIST_';
 
 /**
- * How the registry check reports what it found — in prose, on both paths.
+ * What the registry check found, as data: the payload on its outcome, on
+ * success and on failure alike, whenever the lookup ran. Until the 2.0.0
+ * betas this arrived only in prose and was read out of the message, which
+ * lost any registry whose name had a comma in it (verifier-core#32).
  *
- * Success: `Issuer found in registry: A`, or `Issuer found in 2 registries:
- * A, B`, optionally followed by `. 1 registries could not be checked: C`.
- * Failure: an ISSUER_NOT_REGISTERED problem, plus a REGISTRY_UNCHECKED one
- * carrying the same "could not be checked" sentence.
- *
- * None of it arrives as data — the success outcome has no payload at all —
- * so rendering §5 means reading these sentences. Raised on verifier-core#32;
- * `RegistryLookupResult` on the payload would retire all of this.
+ * `entity` is the registry's own record of the issuer. Not read yet: which
+ * name to show, the registry's or the credential's, is a wording decision.
  */
-export const REGISTRY_FOUND =
-  /Issuer found in (?:\d+ )?registr(?:y|ies): (.+?)(?=\. \d+ registries could not be checked:|$)/;
-export const REGISTRY_UNCHECKED = /\d+ registries could not be checked: (.+)$/;
+export interface RegistryReference {
+  name: string;
+  type: string;
+  url?: string;
+}
+
+export interface RegistryCheckPayload {
+  matches: { registry: RegistryReference; entity?: { name?: string; url?: string; logo?: string } }[];
+  uncheckedRegistries: RegistryReference[];
+}
 
 /**
  * The three structural failures `context-check` reports, all under the title

@@ -538,9 +538,9 @@ export class VerifierCredential extends HTMLElement {
     if (failed) {
       return `<p class="empty">We couldn’t check this, so there are no details to show. ${esc(VIEWS[1].label)} shows the error.</p>`;
     }
-    // Verification that stopped early has no rows to show — but it did not
-    // stop the library: a fatal failure ends only its own suite, and the
-    // others still run and report. So this says there is no breakdown, not
+    // Verification that stopped early has no rows to show — but the library
+    // still reports every check: the ones that ran, and the ones a fatal
+    // failure stopped, as "Not run". So this says there is no breakdown, not
     // that nothing was looked at, and the developer view has every check.
     return this.#checks.length
       ? `<div class="checks" id="checks">${this.#checks.map(checkHtml).join('')}</div>`

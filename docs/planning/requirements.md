@@ -433,7 +433,7 @@ hasn't been tampered with", when the signature held), and what to do, in
 plain words: "We couldn't check this right now. Something went wrong while
 we were checking, so we can't tell you yet whether it's valid. Try again in
 a little while." Friendly, but never comforting about what we don't know.
-consistency.test.ts holds every verdict to this.
+The consistency suite holds every verdict to this.
 
 The advice has to match the cause, though. For a **withdrawn** credential the
 issuer already made their decision, so the useful advice is to ask for a
@@ -535,6 +535,12 @@ nothing was changed: the Tampering row reads "none detected", the issuer row
 stays green, and the reassurance can be said. Only the Dates row reports a
 problem. (Established from the library's code, 30 September 2026, and pinned by
 a test that alters an expired credential and checks it reads as tampered.)
+
+*Update, 21 October 2026:* verifier-core 2.0.0-beta.1 checks the dates in a
+check of their own, which runs only once the seal has verified, so an expired
+credential no longer fails the signature at all. The rows read as above. And
+expiry no longer stops the checks after it, so an expired credential now also
+reports whether it was deactivated and who issued it.
 
 **The name at the top follows the same rule.** When the seal didn't hold —
 an altered credential, or one with no seal at all — the issuer's name in the

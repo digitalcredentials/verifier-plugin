@@ -13,8 +13,8 @@ non-blocking severity; it is **not published to npm**, so anything depending on
 it depends on a git reference until it lands upstream.
 
 *Since then (October 2026):* the fork's work has landed upstream, as 2.x on
-`digitalcredentials/verifier-core`'s main. 2.x is still not on npm (the latest
-there is 1.0.0-beta.11), so verifier-plugin depends on it by git commit. This
+`digitalcredentials/verifier-core`'s main, and was published to npm as
+2.0.0-beta.1 on 21 October, which verifier-plugin now depends on. This
 document still describes 1.0.0-beta.11.
 
 A note on wording: the library's own code calls each individual check a
