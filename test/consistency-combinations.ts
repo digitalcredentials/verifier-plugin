@@ -772,10 +772,14 @@ export const agreementTests = (file: string): void => {
         expect(row(CHECK.signature)?.severity, `${where}: a date reported without the seal`).toBe('success');
       }
 
-      // ...and the Dates row says the same: no date at all, "in date"
-      // included, behind a seal that didn't hold.
+      // ...and the Dates and Status rows say the same: no date and no status
+      // at all behind a seal that didn't hold — not "in date", not "not
+      // deactivated", and not "no way to deactivate this", which removing a
+      // credential's status entry would otherwise buy.
       if (row(CHECK.signature)?.severity !== 'success') {
         expect(row(DATES_ROW)?.value, `${where}: the Dates row behind an unheld seal`).toBe('not checked');
+        expect(row(CHECK.status)?.value, `${where}: the Status row behind an unheld seal`).toBe('not checked');
+        expect(row(CHECK.status)?.severity, `${where}: the Status row behind an unheld seal`).toBe('unchecked');
       }
 
       // Only the library says a credential has run out. An end date in the

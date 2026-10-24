@@ -321,9 +321,14 @@ const believedChecks = (r: VerificationResponse, options: OutcomeOptions): Map<s
  * withdrawal would be the gravest false claim this component could make, and
  * in 1.x only the absence of any distinction kept us from it. A list signed by
  * someone other than the issuer establishes nothing either.
+ *
+ * Nor does any list behind a seal that didn't hold: which entry of it is this
+ * credential's is the credential's own claim, so the answer is too. The
+ * library halts after a failed seal, but the rule must not depend on that,
+ * as for the dates. The same goes for the two below.
  */
 const isWithdrawn = (checks: Map<string, CheckResult>): boolean =>
-  hasProblem(checks.get(CHECK.status), PROBLEM.revoked) && !listNotIssuers(checks);
+  sealHeld(checks) && hasProblem(checks.get(CHECK.status), PROBLEM.revoked) && !listNotIssuers(checks);
 
 /**
  * The issuer has suspended this: set aside, possibly for now. verifier-core
@@ -331,14 +336,19 @@ const isWithdrawn = (checks: Map<string, CheckResult>): boolean =>
  * "withdrawn". Withdrawal leads where a credential carries both.
  */
 const isSuspended = (checks: Map<string, CheckResult>): boolean =>
-  hasProblem(checks.get(CHECK.status), PROBLEM.suspended) && !listNotIssuers(checks);
+  sealHeld(checks) && hasProblem(checks.get(CHECK.status), PROBLEM.suspended) && !listNotIssuers(checks);
 
 /**
  * The withdrawal list loaded, is the issuer's own, and doesn't list this. The
  * only grounds for saying the issuer hasn't withdrawn it.
+ *
+ * Behind a held seal only, like its siblings above. No test can catch this
+ * guard today, since everything that reads this already stands behind a
+ * held seal; it is here because "the issuer hasn't deactivated it" is the
+ * claim that must never leak past a broken seal. Don't remove it.
  */
 const notWithdrawn = (checks: Map<string, CheckResult>): boolean =>
-  passed(checks.get(CHECK.status)) && !listNotIssuers(checks);
+  sealHeld(checks) && passed(checks.get(CHECK.status)) && !listNotIssuers(checks);
 
 /** The withdrawal check ran, failed, and established nothing either way. */
 const withdrawalUnavailable = (check: CheckResult | undefined): boolean =>
@@ -1234,7 +1244,13 @@ export const listChecks = (r: VerificationResponse, options: OutcomeOptions = {}
   });
 
   const revocation = checks.get(CHECK.status);
-  if (!hasStatusList(r)) {
+  if (!sealHeld(checks)) {
+    // Behind a seal that didn't hold, whether the credential has a list, and
+    // which entry of it is its own, are the credential's own claims: removing
+    // its status entry would otherwise read "the issuer set up no way to
+    // deactivate this". So the row reads "not checked", as Dates does.
+    rows.push({ id: CHECK.status, label: 'Status', severity: 'unchecked', value: 'not checked' });
+  } else if (!hasStatusList(r)) {
     // No list at all. Nothing failed, and we cannot say it was not withdrawn
     // either — there was no way to withdraw it. Saying so is for the issuer
     // debugging their own setup, who otherwise cannot tell this apart from a
