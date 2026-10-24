@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { summarise, listChecks, hasStatusList, issuerIdentity } from '../src/outcomes.js';
 import { CHECK, PROBLEM, STATUS_LIST_PROBLEM_PREFIX } from '../src/types.js';
 import type { VerificationResponse, CheckResult } from '../src/types.js';
@@ -569,14 +569,20 @@ const NAMELESS: [string, unknown][] = [
 
 /**
  * Run in parts, one file each (consistency-1.test.ts onwards), each taking
- * every PARTS-th combination. Vitest fails any one test file that runs past
- * 60 seconds, whatever its results ("Timeout calling onTaskUpdate"), and a
- * CI machine can run this three times slower than a laptop: as one file it
- * passed in 34 s on one run and failed at 70 s on the next (22 October
- * 2026). Its own per-test limit is 5 seconds, so the nameless-issuer check,
- * which loops over the combinations inside each test, is split too. Each
- * part takes its number from its file's name, so no two files can run the
- * same part; consistency.test.ts checks that every part has its file.
+ * every PARTS-th combination, so the files run side by side.
+ *
+ * Two Vitest limits apply here whatever the results. A test worker fails the
+ * run, with every test passing ("Timeout calling onTaskUpdate"), when a
+ * message to the main Vitest process waits 60 seconds for its reply to be
+ * read, and tests that never wait never read one: as one file this suite
+ * passed in 34 s on one CI run and failed at 70 s on the next (22 October
+ * 2026). The pause after each test below lets the worker read its replies
+ * however long a file runs; a part slowed to 74 s passes with it and fails
+ * without. And any one test fails past 5 seconds, so the nameless-issuer
+ * tests, which loop, are given longer.
+ *
+ * Each part takes its number from its file's name, so no two files can run
+ * the same part; consistency.test.ts checks that every part has its file.
  */
 export const PARTS = 4;
 
@@ -584,6 +590,7 @@ export const agreementTests = (file: string): void => {
   const part = Number(/\/consistency-([1-9]\d*)\.test\.ts$/.exec(file)?.[1]);
   if (!(part >= 1 && part <= PARTS)) throw new Error(`${file} is not one of consistency-1.test.ts to -${PARTS}`);
   const slice = cases.filter((_, i) => i % PARTS === part - 1);
+  afterEach(() => new Promise<void>((resolve) => setImmediate(resolve)));
   describe(`the headline and the breakdown agree (part ${part} of ${PARTS}: ${slice.length} of ${cases.length} combinations)`, () => {
     it.each(slice)('$name', ({ sig, val, rev, end, iss, sch, list, lists, name }) => {
       const r = build(sig, val, rev, end, iss, sch);
@@ -853,6 +860,8 @@ export const agreementTests = (file: string): void => {
   });
 
   describe(`an issuer with no name is never addressed by its identifier (part ${part} of ${PARTS}: ${slice.length} combinations each)`, () => {
+    // Each loops over a part's combinations: about 0.5 s on a laptop, up to
+    // 2 s on CI (23 October 2026), too near Vitest's 5 s limit per test.
     it.each(NAMELESS)('%s', (_, issuer) => {
       for (const { sig, val, rev, end, iss, sch, list, lists, name } of slice) {
         const r = build(sig, val, rev, end, iss, sch);
@@ -863,6 +872,6 @@ export const agreementTests = (file: string): void => {
           expect(sentence, `${name} → ${out.code}`).not.toMatch(/did:|Unknown issuer|\s\s/);
         }
       }
-    });
+    }, 30_000);
   });
 };
