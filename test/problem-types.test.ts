@@ -11,7 +11,8 @@ import type { VerificationResponse } from '../src/types.js';
  * Everything that decides what a person is told about the seal and the dates
  * now rests on the library's problem *type*: tampering, expiry, a start date
  * not yet reached, and a key that isn't the issuer's each have their own since
- * verifier-core #58 and #59. Before that, expiry and tampering arrived as the
+ * verifier-core #58 and #59, and since 2.0.0-beta.1 the dates come from a
+ * check of their own, which runs once the seal has held. Before that, expiry and tampering arrived as the
  * same INVALID_SIGNATURE, and this file pinned the sentences we told them
  * apart by. Those are gone; this pins the types instead, against the real
  * library and the real fixtures, so a change upstream fails here rather than
@@ -26,25 +27,36 @@ const fixture = (name: string): Record<string, unknown> =>
   JSON.parse(readFileSync(new URL(`../dev/fixtures/${name}.json`, import.meta.url), 'utf8'));
 
 const verify = async (credential: Record<string, unknown>): Promise<VerificationResponse> =>
-  (await verifyCredential({ credential, registries: [], verbose: true })) as VerificationResponse;
+  (await verifyCredential({ credential, registries: [] })) as VerificationResponse;
 
-const signatureTypes = (r: VerificationResponse): string[] => {
-  const outcome = (r.results ?? []).find((c) => c.id === CHECK.signature)?.outcome;
+const problemTypes = (r: VerificationResponse, id: string): string[] => {
+  const outcome = (r.results ?? []).find((c) => c.id === id)?.outcome;
   return outcome?.status === 'failure' ? outcome.problems.map((p) => p.type) : [];
 };
 
+const status = (r: VerificationResponse, id: string) => (r.results ?? []).find((c) => c.id === id)?.outcome.status;
+
 describe('what verifier-core reports, by type', () => {
   it.each([
-    ['expired', PROBLEM.credentialExpired],
-    ['not-yet-valid', PROBLEM.credentialNotYetValid],
     ['tampered', PROBLEM.invalidSignature],
     ['not-their-seal', PROBLEM.verificationMethod],
   ])('fails the signature check on %s with its own type', async (name, type) => {
-    expect(signatureTypes(await verify(fixture(name)))).toEqual([type]);
+    expect(problemTypes(await verify(fixture(name)), CHECK.signature)).toEqual([type]);
   });
 
-  it('passes the signature check on a credential with nothing wrong', async () => {
-    expect(signatureTypes(await verify(fixture('verified')))).toEqual([]);
+  it.each([
+    ['expired', PROBLEM.credentialExpired],
+    ['not-yet-valid', PROBLEM.credentialNotYetValid],
+  ])('passes the signature on %s, and fails the dates with their own type', async (name, type) => {
+    const r = await verify(fixture(name));
+    expect(status(r, CHECK.signature)).toBe('success');
+    expect(problemTypes(r, CHECK.validityPeriod)).toEqual([type]);
+  });
+
+  it('passes the signature and the dates on a credential with nothing wrong', async () => {
+    const r = await verify(fixture('verified'));
+    expect(status(r, CHECK.signature)).toBe('success');
+    expect(status(r, CHECK.validityPeriod)).toBe('success');
   });
 });
 
@@ -55,7 +67,7 @@ describe('what a person is told, end to end', () => {
     expect(out).toMatchObject({ code: 'expired', severity: 'warning', headline: 'Expired on 9 January 2026' });
     expect(out.action).toContain('renewed');
     const rows = listChecks(r);
-    expect(rows.find((c) => c.id === `${CHECK.signature}#dates`)).toMatchObject({ severity: 'warning', value: 'expired on 9 January 2026' });
+    expect(rows.find((c) => c.id === CHECK.validityPeriod)).toMatchObject({ severity: 'warning', value: 'expired on 9 January 2026' });
     expect(rows.find((c) => c.id === CHECK.signature)).toMatchObject({ severity: 'success', value: 'none detected' });
   });
 
@@ -88,9 +100,41 @@ describe('what a person is told, end to end', () => {
     const altered = fixture('expired');
     (altered['credentialSubject'] as Record<string, unknown>)['name'] = 'Someone Else';
     const r = await verify(altered);
-    expect(signatureTypes(r)).toEqual([PROBLEM.invalidSignature]);
+    expect(problemTypes(r, CHECK.signature)).toEqual([PROBLEM.invalidSignature]);
+    // The dates are never reached: a failed seal stops everything after it.
+    expect(status(r, CHECK.validityPeriod)).toBe('skipped');
     expect(summarise(r).code).toBe('invalid_signature');
     expect(listChecks(r).find((c) => c.id === CHECK.signature)?.value).toBe('detected');
+  });
+});
+
+/**
+ * A credential can carry several seals, a proof set. Since 2.0.0-beta.1
+ * (verifier-core#67) each is checked and all must hold: before, one good
+ * seal beside a broken one read as verified. A broken one reads as
+ * tampering, whichever position it is in.
+ */
+describe('a credential with several seals', () => {
+  const sealed = fixture('verified');
+  const seal = sealed['proof'] as Record<string, unknown>;
+  const value = seal['proofValue'] as string;
+  // One character changed near the end, so the seal still parses but no longer matches.
+  const broken = { ...seal, proofValue: `${value.slice(0, -2)}${value.at(-2) === 'A' ? 'B' : 'A'}${value.at(-1)}` };
+
+  it.each([
+    ['second', [seal, broken]],
+    ['first', [broken, seal]],
+  ])('reads as tampered when the %s of two is broken', async (_, proof) => {
+    const r = await verify({ ...sealed, proof });
+    expect(problemTypes(r, CHECK.signature)).toEqual([PROBLEM.invalidSignature]);
+    expect(summarise(r).code).toBe('invalid_signature');
+    expect(listChecks(r).find((c) => c.id === CHECK.signature)?.value).toBe('detected');
+  });
+
+  it('holds when both seals do', async () => {
+    const r = await verify({ ...sealed, proof: [seal, { ...seal }] });
+    expect(status(r, CHECK.signature)).toBe('success');
+    expect(listChecks(r).find((c) => c.id === CHECK.signature)?.value).toBe('none detected');
   });
 });
 

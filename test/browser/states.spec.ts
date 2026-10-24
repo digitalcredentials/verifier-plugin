@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
 import { CHECK, PROBLEM } from '../../src/types.js';
-import { card, preparePages, purl, settle } from './support.js';
+import { card, preparePages, settle } from './support.js';
 
 /**
  * Drives the real component against really-signed credentials, in a real
@@ -59,8 +59,8 @@ test('an altered credential is an error and asks for a fresh copy', async ({ pag
 /**
  * The one state verifier-core itself calls a pass. Its schema result never
  * reaches `verified`, so this whole case is invisible to anything reading the
- * log alone — and it only shows up here because the schema was really
- * fetched and really validated against.
+ * log alone — and it only shows up here because the credential was really
+ * validated against the Open Badges schema bundled with the library.
  */
 test('a credential built wrong is a warning, and asks nothing of the holder', async ({ page }) => {
   const c = await pick(page, 'Built wrong');
@@ -159,21 +159,35 @@ test("a seal made with someone else's key is not called tampering", async ({ pag
 });
 
 /**
- * Clear on that list. Read on trust, this would be Verified — "the issuer
- * hasn't withdrawn it" — on the word of whoever signed the list, who could
- * as easily have un-withdrawn it.
- *
- * Not tested the other way round: a mark on a stranger's list ends
- * verifier-core's status suite before the signer is compared, so the library
- * reports a plain withdrawal (raised upstream).
+ * A list signed by someone other than the issuer, and clear. Read like the
+ * issuer's own by default (Nate Otto, 22 October 2026: DCC's own status
+ * service signs every list with its own key), so it reads Verified; the
+ * mismatch is the library's warning, in the Developer view. Not a demo button
+ * any more, since it would look exactly like "Not withdrawn".
  */
-test("a withdrawal list the issuer didn't sign is not believed", async ({ page }) => {
-  const c = await pick(page, 'Untrusted list');
-  expect(c.severity).toBe('unchecked');
-  expect(c.headline).toContain("We couldn't check whether this copy is still active");
-  expect(c.detail).toContain('The status information we found may not be from the issuer');
-  expect(c.severity).not.toBe('success');
-  expect(await detailRows(page)).toContainEqual(expect.stringContaining('the information we found may not be from the issuer'));
+test("a withdrawal list the issuer didn't sign is read like theirs, and flagged for developers", async ({ page }) => {
+  await settle(page, async () => {
+    await page.evaluate(async () => {
+      const el = document.getElementById('vc') as HTMLElement & { credential?: unknown; registries?: unknown };
+      const credential = await (await fetch('./fixtures/list-not-issuers.json')).json();
+      el.registries = [
+        { name: 'Local Dev Registry', type: 'dcc-legacy', url: new URL('./fixtures/registry.json', location.href).href },
+      ];
+      el.credential = credential;
+    });
+  });
+  const c = await card(page);
+  expect(c.severity).toBe('success');
+  expect(c.headline).toContain('Verified');
+  expect(c.detail).toContain("the issuer hasn't deactivated it");
+  expect(await detailRows(page)).toContainEqual(expect.stringContaining('not deactivated or on hold'));
+
+  await viewButton(page, 'Developer view').click();
+  const text = await page.evaluate(
+    () => document.getElementById('vc')!.shadowRoot!.querySelector('.dev')!.textContent!.replace(/\s+/g, ' '),
+  );
+  expect(text).toContain('Failed: list-issuer');
+  expect(text).toContain('STATUS_LIST_ISSUER_MISMATCH');
 });
 
 test('an unrecognised issuer is never called fake', async ({ page }) => {
@@ -222,7 +236,7 @@ const rowLayout = (page: Page) =>
     }),
   );
 
-for (const situation of ['Registry offline', 'Untrusted list']) {
+for (const situation of ['Registry offline', 'Not their seal']) {
   test(`each Details mark stays beside its text when the text wraps (${situation})`, async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 900 });
     await pick(page, situation);
@@ -637,12 +651,19 @@ test.describe('lifecycle, from review', () => {
     await viewButton(page, 'Developer view').click();
 
     // Mid-check, the old run's rows and checks must be gone rather than
-    // sitting under a verdict that no longer describes them.
+    // sitting under a verdict that no longer describes them. Counted as the
+    // check starts: with nothing to fetch, it can now finish within a tick.
     const during = await page.evaluate(async () => {
       const el = document.getElementById('vc') as HTMLElement & { registries?: unknown };
+      const started = new Promise<number>((resolve) =>
+        el.addEventListener(
+          'verification-started',
+          () => resolve(el.shadowRoot!.querySelectorAll('.check, .dev-check').length),
+          { once: true },
+        ),
+      );
       el.registries = [];
-      await new Promise((r) => setTimeout(r, 0));
-      return el.shadowRoot!.querySelectorAll('.check, .dev-check').length;
+      return started;
     });
     expect(during).toBe(0);
 
@@ -688,9 +709,9 @@ test.describe('lifecycle, from review', () => {
 
 /**
  * A did:web issuer publishes its signing key in a did.json on its own website.
- * When that won't load, verifier-core calls the signature invalid
- * (verifier-core#65), and verify.ts's namingDidWebOutages turns it back into
- * "couldn't reach". The credential is vc-test-fixtures' badDidWeb.json (see
+ * When that won't load, verifier-core reports DID_WEB_UNRESOLVED, which reads
+ * "couldn't reach" (verifier-core#65, fixed in 2.0.0-beta.1; until then it
+ * called the signature invalid, and verify.ts carried a stopgap). The credential is vc-test-fixtures' badDidWeb.json (see
  * test/did-web-outages.test.ts). Its issuer's did.json is answered here, so
  * nothing reaches the real site. Against a published copy, this exercises
  * the built-in fetcher that builds use.
@@ -734,19 +755,12 @@ test.describe('a withdrawal list on another site', () => {
 
   const OTHER_SITE = 'http://127.0.0.1:5182';
 
-  // Any active Playwright route stops Chromium refusing preflighted requests
-  // across sites, so the schema route (in support.ts) has to go. These
-  // credentials name the other site's copy of the schema instead, and
-  // listening (unlike routing) leaves the browser's rules alone.
-  // Unrouted, nothing stops a schema fetch from reaching purl, so here even
-  // that one counts: these credentials name the other site's copy.
+  // No routes here: any active Playwright route stops Chromium refusing
+  // preflighted requests across sites (checked 1 October 2026), which would
+  // hide exactly the failure these tests exist to catch. So support.ts's
+  // refusal of purl goes; its watch, which only listens, stays.
   test.beforeEach(async ({ page }) => {
     await page.unroute('https://purl.imsglobal.org/**');
-    purl.length = 0;
-  });
-
-  test.afterEach(() => {
-    expect(purl, 'requests to purl.imsglobal.org').toEqual([]);
   });
 
   /** Gives the card a credential from the other site; returns the library's seal and status checks. */
@@ -783,7 +797,7 @@ test.describe('a withdrawal list on another site', () => {
         });
         const credential = await (await fetch(url)).json();
         // Both in one go: set apart, the registries alone would re-check the
-        // demo's own credential, which fetches the schema from purl.
+        // demo's own credential first.
         el.registries = [
           { name: 'Local Dev Registry', type: 'dcc-legacy', url: new URL('./fixtures/registry.json', location.href).href },
         ];

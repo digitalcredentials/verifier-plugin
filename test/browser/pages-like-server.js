@@ -11,7 +11,7 @@
  * wallet does with every credential.
  */
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -47,21 +47,11 @@ for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
 const files = (() => {
   const out = mkdtempSync(join(tmpdir(), 'pages-like-'));
   try {
-    // The credentials name this server's copy of the Open Badges schema, so
-    // the tests using them need no request interception. They can't use any:
-    // once a Playwright route is active, Chromium stops refusing preflighted
-    // requests across sites (checked 1 October 2026), so a route here would
-    // hide exactly the failure these tests exist to catch.
-    copyFileSync(
-      fileURLToPath(new URL('./fixtures/ob_v3p0_achievementcredential_schema.json', import.meta.url)),
-      join(out, 'schema.json'),
-    );
     execFileSync(process.execPath, [fileURLToPath(new URL('../../scripts/make-fixtures.js', import.meta.url))], {
       env: {
         ...process.env,
         FIXTURES_OUT: out,
         FIXTURES_STATUS_LIST_URL: `${ORIGIN}/status-list.json`,
-        FIXTURES_SCHEMA_URL: `${ORIGIN}/schema.json`,
       },
       // Quiet unless it fails: Playwright shows only that the server never came up.
       stdio: ['ignore', 'ignore', 'inherit'],

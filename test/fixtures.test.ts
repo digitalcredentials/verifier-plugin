@@ -22,7 +22,6 @@ const verify = async (name: string): Promise<VerificationResponse> =>
   (await verifyCredential({
     credential: fixture(name),
     registries: [],
-    verbose: true,
     recognizers: [obv3p0Recognizer],
   })) as VerificationResponse;
 

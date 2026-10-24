@@ -22,7 +22,6 @@ const withoutStatusList = {
 
 const pass = (id: string, message = 'ok', fatal = false): CheckResult => ({
   id,
-  check: id.split('.').slice(-1)[0]!,
   suite: id.split('.').slice(1, 2)[0]!,
   outcome: { status: 'success', message },
   fatal,
@@ -30,7 +29,6 @@ const pass = (id: string, message = 'ok', fatal = false): CheckResult => ({
 
 const fail = (id: string, problems: ProblemDetail[], fatal = false): CheckResult => ({
   id,
-  check: id.split('.').slice(-1)[0]!,
   suite: id.split('.').slice(1, 2)[0]!,
   outcome: { status: 'failure', problems },
   fatal,
@@ -38,10 +36,32 @@ const fail = (id: string, problems: ProblemDetail[], fatal = false): CheckResult
 
 const skip = (id: string, reason: string): CheckResult => ({
   id,
-  check: id.split('.').slice(-1)[0]!,
   suite: id.split('.').slice(1, 2)[0]!,
   outcome: { status: 'skipped', reason },
 });
+
+/**
+ * The registry check as the library passes it: the names in its message, and
+ * again as data on its payload, which is the copy we read.
+ */
+const registered = (names: string[], unchecked: string[] = []): CheckResult => {
+  const message = `Issuer found in registry: ${names.join(', ')}`;
+  return {
+    id: CHECK.registeredIssuer,
+    suite: 'registry',
+    outcome: {
+      status: 'success',
+      message: unchecked.length
+        ? `${message}. ${unchecked.length} registries could not be checked: ${unchecked.join(', ')}`
+        : message,
+      payload: {
+        matches: names.map((name) => ({ registry: { name, type: 'dcc-legacy' } })),
+        uncheckedRegistries: unchecked.map((name) => ({ name, type: 'dcc-legacy' })),
+      },
+    },
+    fatal: false,
+  };
+};
 
 /** Replace one check in place, leaving the rest of the result alone. */
 const set = (r: VerificationResponse, replacement: CheckResult): void => {
@@ -78,10 +98,9 @@ const tamperedSignature = (): CheckResult =>
   );
 
 /**
- * An expired credential still fails the *signature* check — the dates are
- * judged there — but since verifier-core #58 with its own problem type,
- * carrying the library's date sentence as its detail. The end date is set too,
- * because the headline names it.
+ * An expired credential fails the validity period check, which runs after the
+ * signature passed, with the library's date sentence as its detail. The end
+ * date is set too, because the headline names it.
  */
 const PAST = '2026-01-09T10:00:00Z';
 const expire = (r: VerificationResponse): void => {
@@ -89,7 +108,7 @@ const expire = (r: VerificationResponse): void => {
   set(
     r,
     fail(
-      CHECK.signature,
+      CHECK.validityPeriod,
       [
         {
           type: PROBLEM.credentialExpired,
@@ -112,8 +131,9 @@ const ok = (): VerificationResponse => ({
     pass(CHECK.credentialId, 'ok', true),
     pass(CHECK.proofExists, 'ok', true),
     pass(CHECK.signature, 'Signature verified.', true),
+    pass(CHECK.validityPeriod, 'The credential is within its validity period.', true),
     pass(CHECK.status, 'Credential status is valid (not revoked or suspended).'),
-    pass(CHECK.registeredIssuer, 'Issuer found in registry: DCC Registry'),
+    registered(['DCC Registry']),
     pass(CHECK.schema, 'Schema validation passed.'),
   ],
 });
@@ -475,7 +495,7 @@ describe('findings from review', () => {
     // The registry recognised the issuer but supplied no organisation name.
     // The top line must not say "Verified" while the details deny the match.
     const r = ok();
-    set(r, pass(CHECK.registeredIssuer, 'Issuer found in registry: DCC Registry'));
+    set(r, registered(['DCC Registry']));
     expect(issuerIdentity(r).source).toBe('registry');
     expect(summarise(r).severity).toBe('success');
     const issuerRow = listChecks(r).find((c) => c.id === CHECK.registeredIssuer);
@@ -543,21 +563,7 @@ describe('what an expired credential says', () => {
     expire(r);
     // The installed library can't produce this — it checks dates only after
     // the seal — but the rule must not depend on that staying true.
-    set(
-      r,
-      fail(
-        CHECK.signature,
-        [
-          { type: PROBLEM.invalidSignature, title: 'Invalid Signature', detail: 'Invalid signature.' },
-          {
-            type: PROBLEM.credentialExpired,
-            title: 'Credential Expired',
-            detail: `The current date time is after "validUntil" (${PAST}).`,
-          },
-        ],
-        true,
-      ),
-    );
+    set(r, tamperedSignature());
     expect(summarise(r).code).toBe('invalid_signature');
     expect(listChecks(r).find((c) => c.id === CHECK.signature)).toMatchObject({
       severity: 'error',
@@ -1021,14 +1027,8 @@ describe('an unreachable registry when another one answered', () => {
   // issued this" above a row reading "found in DCC Registry".
   const matchedAndUnreachable = (): VerificationResponse => {
     const r = ok();
-    // Both facts arrive in one sentence on the success message.
-    set(
-      r,
-      pass(
-        CHECK.registeredIssuer,
-        'Issuer found in registry: DCC Registry. 1 registries could not be checked: Second Registry',
-      ),
-    );
+    // Both facts arrive on the success outcome's payload.
+    set(r, registered(['DCC Registry'], ['Second Registry']));
     return r;
   };
 
@@ -1272,10 +1272,39 @@ describe('findings from the review of the 2.x migration', () => {
         true,
       ),
     );
-    expect(summarise(r).code).not.toBe('expired');
-    expect(listChecks(r).find((c) => c.id === `${CHECK.signature}#dates`)?.severity).toBe(
-      'unchecked',
+    // Reported expired all the same: the library halts after a failed seal,
+    // but the rule must not depend on that staying true.
+    set(
+      r,
+      fail(
+        CHECK.validityPeriod,
+        [{ type: PROBLEM.credentialExpired, title: 'Credential Expired', detail: 'after "validUntil"' }],
+        true,
+      ),
     );
+    expect(summarise(r).code).not.toBe('expired');
+    expect(summarise(r).headline).not.toMatch(/expired/i);
+    expect(listChecks(r).find((c) => c.id === CHECK.validityPeriod)).toMatchObject({
+      severity: 'unchecked',
+      value: 'not checked',
+    });
+  });
+
+  it.each([
+    ['a start date to come', PROBLEM.credentialNotYetValid, 'not_yet_valid'],
+    ['no date problem at all', undefined, 'verified'],
+  ])('does not assert %s behind a seal nobody checked', (_, type, code) => {
+    // No signature step at all, and dates the library says are wrong or fine:
+    // either way they are the credential's own claim.
+    const r = ok();
+    remove(r, CHECK.signature);
+    if (type) set(r, fail(CHECK.validityPeriod, [{ type, title: 't', detail: 'd' }], true));
+    expect(summarise(r).code).not.toBe(code);
+    expect(summarise(r).code).toBe('signature_unchecked');
+    expect(listChecks(r).find((c) => c.id === CHECK.validityPeriod)).toMatchObject({
+      severity: 'unchecked',
+      value: 'not checked',
+    });
   });
 
   it('separates a malformed credential from one whose vocabulary cannot be read', () => {
@@ -1340,12 +1369,14 @@ describe('findings from the review of the 2.x migration', () => {
     }
   });
 
-  it('keeps a registry name that contains a period intact', () => {
+  it('keeps a registry name that contains a comma intact', () => {
     // No earner text shows the name any more, but the identity still carries
-    // it, and reading it out of the library's prose must not cut it short.
+    // it. Read out of the library's prose, which joins names with ", ", this
+    // came back as two registries.
     const r = ok();
-    set(r, pass(CHECK.registeredIssuer, 'Issuer found in registry: registry.example.edu'));
-    expect(issuerIdentity(r).registries).toEqual(['registry.example.edu']);
+    set(r, registered(['Acme Registry, Inc.'], ['Beta, Ltd.']));
+    expect(issuerIdentity(r).registries).toEqual(['Acme Registry, Inc.']);
+    expect(issuerIdentity(r).unreachable).toEqual(['Beta, Ltd.']);
   });
 
   it('names no registry anywhere the earner reads', () => {
@@ -1491,7 +1522,7 @@ describe('when the host could not get its list of registries', () => {
 });
 
 // ---------------------------------------------------------------------------
-// verifier-core main (d217b04): problems it now names by type
+// Problems verifier-core names by type (since its main of 7 October 2026)
 // ---------------------------------------------------------------------------
 
 const revokedBy = (type: string, title: string): CheckResult =>
@@ -1547,34 +1578,105 @@ describe('a suspended credential', () => {
   });
 });
 
-describe('a withdrawal list signed by someone other than the issuer', () => {
-  // The first two and the last are shapes verifier-core's main can't produce
-  // yet: a mark ends its status suite before the signer is compared, so the
-  // mismatch arrives only for a list that passed. They pin the rules for when
-  // it does. The third is the case it reports today.
+/** Only a list the credential's own issuer signed is believed: off by default (see OutcomeOptions). */
+const STRICT = { requireIssuerSignedStatusList: true } as const;
+const strictRow = (r: VerificationResponse, id: string) => listChecks(r, STRICT).find((c) => c.id === id);
+
+describe('a withdrawal list signed by someone other than the issuer, by default', () => {
+  // Read like any other (Nate Otto, 22 October 2026): DCC's own status
+  // service signs every list with its own key. The mismatch is the library's
+  // warning in the Developer view; the headline and rows don't change.
+  it.each([
+    ['clear', () => pass(CHECK.status, 'Credential status is valid (not revoked or suspended).'), 'verified', 'not deactivated or on hold'],
+    ['deactivated', () => revokedBy(PROBLEM.revoked, 'Credential Revoked'), 'withdrawn', 'deactivated by the issuer'],
+    ['on hold', () => revokedBy(PROBLEM.suspended, 'Credential Suspended'), 'suspended', 'put on hold by the issuer'],
+  ])('reads a list that says %s exactly as the issuer\'s own', (_, status, code, value) => {
+    const own = ok();
+    set(own, status());
+    const others = ok();
+    set(others, status());
+    add(others, listSignedByAnother());
+    expect(summarise(others)).toEqual(summarise(own));
+    expect(listChecks(others)).toEqual(listChecks(own));
+    expect(summarise(others).code).toBe(code);
+    expect(row(others, CHECK.status)?.value).toBe(value);
+  });
+});
+
+describe('a withdrawal list signed by someone other than the issuer, when only the issuer\'s own is believed', () => {
+  it('still believes the issuer\'s own list', () => {
+    const r = ok();
+    set(r, revokedBy(PROBLEM.revoked, 'Credential Revoked'));
+    add(r, pass(CHECK.statusListIssuer, 'The status list was issued by the credential issuer.'));
+    expect(summarise(r, STRICT).code).toBe('withdrawn');
+    expect(strictRow(r, CHECK.status)?.value).toBe('deactivated by the issuer');
+  });
+
+  it.each([
+    ['came back clear', () => pass(CHECK.status, 'Credential status is valid (not revoked or suspended).')],
+    ['says deactivated', () => revokedBy(PROBLEM.revoked, 'Credential Revoked')],
+    ['says on hold', () => revokedBy(PROBLEM.suspended, 'Credential Suspended')],
+  ])('believes nothing, and says it couldn\'t finish, when the list %s but its signer check errored', (_, status) => {
+    // Fail closed, and say what happened: the signer is unknown, not a
+    // stranger, so not the stranger's-list wording either.
+    const r = ok();
+    set(r, status());
+    add(r, fail(CHECK.statusListIssuer, [{ type: 'https://www.w3.org/TR/vc-data-model#CHECK_ERROR', title: 'Check Error', detail: 'x' }]));
+    const out = summarise(r, STRICT);
+    expect(out.code).toBe('withdrawal_unknown');
+    expect(out.detail).toContain("we couldn't finish that check");
+    expect(out.detail).not.toContain('may not be from the issuer');
+    expect(strictRow(r, CHECK.status)).toMatchObject({ severity: 'unchecked', value: 'not checked' });
+  });
+
+  it('believes nothing when the check of the list\'s signer was skipped', () => {
+    // The library doesn't skip it for a list it read; if that ever changes, a
+    // skip confirms nothing either.
+    const r = ok();
+    set(r, revokedBy(PROBLEM.revoked, 'Credential Revoked'));
+    add(r, skip(CHECK.statusListIssuer, 'Skipped.'));
+    const out = summarise(r, STRICT);
+    expect(out.code).toBe('withdrawal_unknown');
+    expect(out.detail).toContain("we couldn't finish that check");
+    expect(strictRow(r, CHECK.status)).toMatchObject({ severity: 'unchecked', value: 'not checked' });
+  });
+
+  it('believes nothing when there is no check of the list\'s signer at all', () => {
+    const r = ok();
+    set(r, revokedBy(PROBLEM.revoked, 'Credential Revoked'));
+    const out = summarise(r, STRICT);
+    expect(out.code).toBe('withdrawal_unknown');
+    expect(out.detail).toContain("we couldn't finish that check");
+    expect(out.detail).not.toContain('may not be from the issuer');
+    expect(strictRow(r, CHECK.status)).toMatchObject({ severity: 'unchecked', value: 'not checked' });
+  });
+
+  // A mismatch on a list that marked the credential arrives since
+  // 2.0.0-beta.1: before, a mark ended the status suite before the signer was
+  // compared, and only a list that passed reported it.
   it('is not repeated when it says "withdrawn"', () => {
     const r = ok();
     set(r, revokedBy(PROBLEM.revoked, 'Credential Revoked'));
     add(r, listSignedByAnother());
-    const out = summarise(r);
+    const out = summarise(r, STRICT);
     expect(out).toMatchObject({ severity: 'unchecked', code: 'withdrawal_unknown' });
     expect(out.detail).toContain('The status information we found may not be from the issuer');
     // Retrying cannot fix a list signed by the wrong key.
     expect(out.action).not.toContain('Try again');
-    expect(row(r, CHECK.status)).toMatchObject({
+    expect(strictRow(r, CHECK.status)).toMatchObject({
       severity: 'unchecked',
       value: "couldn't check — the information we found may not be from the issuer",
     });
     expect(out.action).toBe("Let Springfield College know we couldn't check whether this copy is still active.");
     // The earner doesn't know there is a list; that belongs in the Developer view.
-    expect(`${out.detail} ${out.action} ${row(r, CHECK.status)?.value}`).not.toMatch(/\blist(s|ed)?\b/i);
+    expect(`${out.detail} ${out.action} ${strictRow(r, CHECK.status)?.value}`).not.toMatch(/\blist(s|ed)?\b/i);
   });
 
   it('does not put a bare identifier mid-sentence when the issuer gives no name', () => {
     const r = ok();
     r.verifiableCredential = { ...r.verifiableCredential, issuer: 'did:key:z6Mkn' };
     add(r, listSignedByAnother());
-    const out = summarise(r);
+    const out = summarise(r, STRICT);
     expect(out.code).toBe('withdrawal_unknown');
     expect(out.detail).toContain('may not be from the issuer');
     expect(out.detail).not.toContain('did:key');
@@ -1584,7 +1686,7 @@ describe('a withdrawal list signed by someone other than the issuer', () => {
     const r = ok();
     set(r, revokedBy(PROBLEM.suspended, 'Credential Suspended'));
     add(r, listSignedByAnother());
-    expect(summarise(r).code).toBe('withdrawal_unknown');
+    expect(summarise(r, STRICT).code).toBe('withdrawal_unknown');
   });
 
   it('is not repeated when it says the credential is clear, either', () => {
@@ -1592,20 +1694,20 @@ describe('a withdrawal list signed by someone other than the issuer', () => {
     // issuer hasn't withdrawn it" would take a stranger's word for it.
     const r = ok();
     add(r, listSignedByAnother());
-    const out = summarise(r);
+    const out = summarise(r, STRICT);
     expect(out.code).toBe('withdrawal_unknown');
     expect(`${out.headline} ${out.detail}`).not.toMatch(/hasn['’]t (?:withdrawn|deactivated)/);
-    expect(row(r, CHECK.status)?.severity).toBe('unchecked');
+    expect(strictRow(r, CHECK.status)?.severity).toBe('unchecked');
     // The case verifier-core reports today, so pin its wording here too.
     expect(out.detail).toContain('The status information we found may not be from the issuer');
-    expect(`${out.detail} ${out.action} ${row(r, CHECK.status)?.value}`).not.toMatch(/\blist(s|ed)?\b/i);
+    expect(`${out.detail} ${out.action} ${strictRow(r, CHECK.status)?.value}`).not.toMatch(/\blist(s|ed)?\b/i);
   });
 
   it("keeps an expired credential's reassurance to the seal", () => {
     const r = ok();
     expire(r);
     add(r, listSignedByAnother());
-    const out = summarise(r);
+    const out = summarise(r, STRICT);
     expect(out.code).toBe('expired');
     expect(out.detail).toBe("It hasn't been tampered with.");
   });
@@ -1617,7 +1719,7 @@ describe('a credential not valid yet', () => {
     set(
       r,
       fail(
-        CHECK.signature,
+        CHECK.validityPeriod,
         [
           {
             type: PROBLEM.credentialNotYetValid,
@@ -1641,7 +1743,7 @@ describe('a credential not valid yet', () => {
       detail: "It hasn't been tampered with, and the issuer hasn't deactivated it.",
       action: 'Check it again on or after that date.',
     });
-    expect(row(r, `${CHECK.signature}#dates`)).toMatchObject({ severity: 'warning', value: 'not valid until 1 January 2099' });
+    expect(row(r, CHECK.validityPeriod)).toMatchObject({ severity: 'warning', value: 'not valid until 1 January 2099' });
     expect(row(r, CHECK.signature)).toMatchObject({ severity: 'success', value: 'none detected' });
     expect(issuerIdentity(r).sealHeld).toBe(true);
   });
@@ -1659,7 +1761,7 @@ describe('a credential not valid yet', () => {
     const out = summarise(r);
     expect(out.headline).toBe("This isn't valid yet");
     expect(out.action).toBe('Check it again later.');
-    expect(row(r, `${CHECK.signature}#dates`)?.value).toBe('not valid yet');
+    expect(row(r, CHECK.validityPeriod)?.value).toBe('not valid yet');
   });
 });
 
@@ -1724,30 +1826,24 @@ describe('a seal made with a key that is not the issuer’s', () => {
 
 describe('checks verifier-core stopped before, after a fatal signature failure', () => {
   const NOT_RUN = 'Not run: proof.signature failed';
-  /** What the library now returns for an expired credential: nothing after the seal. */
-  const expiredAndHalted = (): VerificationResponse => {
+  /** What the library returns after a seal it couldn't check: nothing after it. */
+  const unsealedAndHalted = (): VerificationResponse => {
     const r = ok();
-    expire(r);
-    set(r, skip(CHECK.status, NOT_RUN));
-    set(r, skip(CHECK.registeredIssuer, NOT_RUN));
-    set(r, skip(CHECK.schema, NOT_RUN));
+    set(r, fail(CHECK.signature, [{ type: PROBLEM.proofVerification, title: 'No Applicable Crypto Service', detail: 'x' }], true));
+    for (const id of [CHECK.validityPeriod, CHECK.status, CHECK.registeredIssuer, CHECK.schema]) {
+      set(r, skip(id, NOT_RUN));
+    }
     return r;
   };
 
   it('reads "not checked" rather than inventing a failure', () => {
-    const rows = listChecks(expiredAndHalted());
+    const rows = listChecks(unsealedAndHalted());
     const value = (id: string) => rows.find((c) => c.id === id)?.value;
-    expect(value(CHECK.registeredIssuer)).toBe('Springfield College — not checked');
+    expect(value(CHECK.validityPeriod)).toBe('not checked');
     expect(value(CHECK.status)).toBe('not checked');
     // Not "couldn't load the standard": nothing was tried.
     expect(value(CHECK.schema)).toBe('not checked');
-    expect(schemaFinding(expiredAndHalted())).toEqual({ state: 'not_run' });
-  });
-
-  it('still reports the expiry, and claims nothing about the withdrawal it never checked', () => {
-    const out = summarise(expiredAndHalted());
-    expect(out.code).toBe('expired');
-    expect(out.detail).toBe("It hasn't been tampered with.");
+    expect(schemaFinding(unsealedAndHalted())).toEqual({ state: 'not_run' });
   });
 
   it('marks a tampered credential’s name unconfirmed, though its issuer was never looked up', () => {
@@ -1757,6 +1853,104 @@ describe('checks verifier-core stopped before, after a fatal signature failure',
     const id = issuerIdentity(r);
     expect(id.source).toBe('unknown');
     expect(issuerMarker(id.source, id.sealHeld)).toBe('unconfirmed');
+  });
+});
+
+describe('an expired credential, now that expiry stops nothing after it', () => {
+  // Until 2.0.0-beta.1 expiry halted every later check, so an expired
+  // credential said nothing of its withdrawal or its issuer.
+  it('still says it was deactivated, ahead of the expiry', () => {
+    const r = ok();
+    expire(r);
+    set(r, revokedBy(PROBLEM.revoked, 'Credential Revoked'));
+    expect(summarise(r).code).toBe('withdrawn');
+    expect(row(r, CHECK.status)).toMatchObject({ severity: 'error', value: 'deactivated by the issuer' });
+    expect(row(r, CHECK.validityPeriod)).toMatchObject({ severity: 'warning', value: 'expired on 9 January 2026' });
+  });
+
+  it('still says it was put on hold, ahead of the expiry', () => {
+    const r = ok();
+    expire(r);
+    set(r, revokedBy(PROBLEM.suspended, 'Credential Suspended'));
+    expect(summarise(r).code).toBe('suspended');
+  });
+
+  it('says the issuer has not deactivated it, now the list was read', () => {
+    const r = ok();
+    expire(r);
+    expect(summarise(r)).toMatchObject({
+      code: 'expired',
+      detail: "It hasn't been tampered with, and the issuer hasn't deactivated it.",
+    });
+  });
+
+  it('names its issuer as known, now the lookup ran', () => {
+    const r = ok();
+    expire(r);
+    expect(row(r, CHECK.registeredIssuer)).toMatchObject({
+      severity: 'success',
+      value: 'Springfield College — a known issuer',
+    });
+  });
+});
+
+describe('dates nobody checked, though the seal held', () => {
+  // A check that throws comes back as a failure carrying CHECK_ERROR, with no
+  // date named; a run limited to some phases leaves no row at all.
+  const datesThrew = (): CheckResult =>
+    fail(
+      CHECK.validityPeriod,
+      [{ type: 'https://www.w3.org/TR/vc-data-model#CHECK_ERROR', title: 'Check Error', detail: 'Check "proof.validity-period" threw: x' }],
+      true,
+    );
+
+  it.each([
+    ['the dates check threw', (r: VerificationResponse) => set(r, datesThrew())],
+    ['no dates check reported', (r: VerificationResponse) => remove(r, CHECK.validityPeriod)],
+  ])('says it could not check, when %s', (_, spoil) => {
+    const r = ok();
+    spoil(r);
+    expect(summarise(r)).toEqual({
+      code: 'dates_unchecked',
+      severity: 'unchecked',
+      headline: "We couldn't check this right now",
+      detail: "Something went wrong while we were checking, so we can't tell you yet whether it's valid.",
+      action: 'Try again in a little while.',
+    });
+    expect(row(r, CHECK.validityPeriod)).toMatchObject({ severity: 'unchecked', value: 'not checked' });
+    // The seal still held, and the Tampering row says so.
+    expect(row(r, CHECK.signature)).toMatchObject({ severity: 'success', value: 'none detected' });
+  });
+
+  it('outranks who issued it', () => {
+    // "Genuine, but we can't confirm who issued it" would settle the dates by
+    // saying nothing of them.
+    const r = ok();
+    set(r, datesThrew());
+    set(r, notRegistered());
+    expect(summarise(r).code).toBe('dates_unchecked');
+  });
+
+  it('yields to a withdrawal check that could not finish, which names what we could not check', () => {
+    const r = ok();
+    set(r, datesThrew());
+    set(r, skip(CHECK.status, 'Status type "StatusList2021Entry" is not BitstringStatusListEntry.'));
+    expect(summarise(r).code).toBe('withdrawal_unknown');
+  });
+
+  it('yields to a withdrawal list we could not rely on, whose words say whose it is to fix', () => {
+    const r = ok();
+    set(r, datesThrew());
+    add(r, listSignedByAnother());
+    expect(summarise(r, STRICT).code).toBe('withdrawal_unknown');
+    expect(summarise(r, STRICT).action).toContain('know');
+  });
+
+  it('yields to a withdrawal, which the issuer has already decided', () => {
+    const r = ok();
+    set(r, datesThrew());
+    set(r, revokedBy(PROBLEM.revoked, 'Credential Revoked'));
+    expect(summarise(r).code).toBe('withdrawn');
   });
 });
 
@@ -1809,7 +2003,9 @@ describe('findings from the review of the verifier-core main adaptation', () => 
     expect(summarise(r).action).toBe("Try again in a little while. If it still doesn't work, let the issuer know.");
   });
 
-  it('says the issuer was not checked after the withdrawal check stopped everything', () => {
+  it('says the issuer was not checked if a check before the lookup stopped it', () => {
+    // The library's own fatal checks don't stop the lookup once the seal has
+    // held, but a halted lookup still reads as one, not as a finding.
     const r = ok();
     set(r, revokedBy(PROBLEM.revoked, 'Credential Revoked'));
     set(r, skip(CHECK.registeredIssuer, NOT_RUN('status.bitstring')));
