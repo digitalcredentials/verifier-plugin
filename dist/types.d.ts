@@ -1,0 +1,235 @@
+/**
+ * The shapes verifier-core 2.x actually returns at runtime.
+ *
+ * Still written from the running library rather than imported from its type
+ * declarations, for the same reason as before 2.x: what we render has to match
+ * what arrives. The 1.x mismatch these notes used to describe (declarations
+ * naming `foundInRegistries` while the code attached `matchingIssuers`) is
+ * gone, but the habit is worth keeping — every id and problem type below was
+ * read off real output from our own fixtures, not off a `.d.ts`.
+ *
+ * What 2.x gives us that we used to build by hand:
+ *
+ * - `skipped` carries a reason, so "there was nothing to check" stops being an
+ *   inference from an absent step.
+ * - `fatal` is a flag on the check rather than a guess from position.
+ * - check ids are namespaced, so two suites can own a check of the same name.
+ */
+/** The four severities. This set does not grow; the message list does. */
+export type Severity = 'success' | 'warning' | 'error' | 'unchecked';
+/**
+ * One problem, in RFC 9457 shape.
+ *
+ * `type` is the stable part and the only part worth branching on. `detail` is
+ * prose meant for a developer. We read it only where the library carries a
+ * fact nowhere else — registry names, below, and schema clauses in
+ * outcomes.ts — and never to decide what a credential is accused of.
+ */
+export interface ProblemDetail {
+    type: string;
+    title: string;
+    detail?: string;
+    instance?: string;
+}
+/**
+ * The three ways a check can end.
+ *
+ * The tagged shape is the whole reason the reading layer got smaller: in 1.x a
+ * check that could not be completed carried an error and simply had no `valid`
+ * field, so every read had to spell `=== true` to avoid turning "we couldn't
+ * check" into "this failed". Here the three cases cannot be confused.
+ */
+export type CheckOutcome = {
+    status: 'success';
+    message: string;
+    payload?: unknown;
+} | {
+    status: 'failure';
+    problems: ProblemDetail[];
+    payload?: unknown;
+} | {
+    status: 'skipped';
+    reason: string;
+};
+export interface CheckResult {
+    /** `<phase>.<suite>.<localPart>`, on every row. The one thing to match on. */
+    id: string;
+    suite: string;
+    outcome: CheckOutcome;
+    /** Set when the check was marked fatal in its suite definition. */
+    fatal?: boolean;
+    /**
+     * `false` on a fatal check whose failure leaves the checks after it
+     * running: validity dates and status. Absent, a fatal failure halts.
+     */
+    halts?: boolean;
+}
+/**
+ * Per-suite rollup.
+ *
+ * We do not read it for the verdict, and the reason is worth recording: its
+ * `counts` are per suite, not per check, so in any suite with more than one
+ * check it cannot tell you *which* check passed. That is precisely the
+ * distinction this component exists to get right, so the verdict is built from
+ * `results[]`, which lists every check that ran, was skipped, or was not run.
+ */
+export interface SuiteSummary {
+    id: string;
+    phase: string;
+    suite: string;
+    status: 'success' | 'failure' | 'skipped' | 'mixed';
+    message: string;
+    counts: {
+        passed: number;
+        failed: number;
+        skipped: number;
+    };
+    fatalFailureAt?: string;
+}
+/** What `verifyCredential` hands back for a single credential. */
+export interface VerificationResponse {
+    verified: boolean;
+    verifiableCredential?: Record<string, unknown>;
+    normalizedVerifiableCredential?: unknown;
+    recognizedProfile?: string;
+    results?: CheckResult[];
+    summary?: SuiteSummary[];
+    partial?: boolean;
+}
+/**
+ * Check ids, read from real output rather than from the library's constants —
+ * the library does not export them, and the last segment is assembled by the
+ * suite that owns it.
+ *
+ * `schema` looks wrong and is not: the suite is `openbadges.schema` and the
+ * check inside it is `schema.obv3.json`, so the word repeats when the two are
+ * joined. Reproduced here exactly as it arrives.
+ */
+export declare const CHECK: {
+    /** A document that could not be parsed as a credential at all. */
+    readonly envelope: "cryptographic.parsing.envelope";
+    readonly contextExists: "cryptographic.core.context-exists";
+    readonly vcContext: "cryptographic.core.vc-context";
+    /**
+     * The credential's shape against the VC data model: dates that parse, a
+     * status entry with a type, and so on. Fatal, like the other core checks.
+     */
+    readonly vcStructure: "cryptographic.core.vc-structure";
+    readonly credentialId: "cryptographic.core.credential-id";
+    readonly proofExists: "cryptographic.core.proof-exists";
+    readonly signature: "cryptographic.proof.signature";
+    /**
+     * The credential's own dates against the library's clock. Runs only once
+     * the signature has verified, so a failure here is a genuine credential
+     * that has run out or hasn't started. Fatal, but it doesn't halt: the
+     * withdrawal list and the issuer lookup are still read.
+     */
+    readonly validityPeriod: "cryptographic.proof.validity-period";
+    readonly status: "cryptographic.status.bitstring";
+    /**
+     * Whether the credential's status lists were signed by its own issuer: one
+     * answer for all of them. Runs after `status` whenever a list was checked,
+     * and compares only lists whose signature it can establish. Fails if any
+     * one is someone else's; skipped if any couldn't be established and none
+     * was someone else's.
+     */
+    readonly statusListIssuer: "cryptographic.status.list-issuer";
+    readonly registeredIssuer: "trust.registry.issuer";
+    readonly recognition: "recognition.profile";
+    readonly schema: "semantic.openbadges.schema.schema.obv3.json";
+};
+/** Problem types we branch on. Everything else falls through to a default. */
+export declare const PROBLEM: {
+    /**
+     * The seal does not match the content: it was altered after issue. Since
+     * verifier-core #58 and #59 this type means only that — expiry, a date not
+     * yet reached, and a key that isn't the issuer's each have their own.
+     */
+    readonly invalidSignature: "https://www.w3.org/TR/vc-data-model#INVALID_SIGNATURE";
+    /**
+     * The seal held, and the end date has passed. Reported by the validity
+     * period check, which runs only after the signature verified, so this is
+     * evidence the credential is genuine, not a doubt about it.
+     */
+    readonly credentialExpired: "https://www.w3.org/TR/vc-data-model#CREDENTIAL_EXPIRED";
+    /** As above, for a start date still in the future. */
+    readonly credentialNotYetValid: "https://www.w3.org/TR/vc-data-model#CREDENTIAL_NOT_YET_VALID";
+    /**
+     * The key that made the seal is missing, not authorised for it, or not the
+     * issuer's. The content may be untouched; what can't be shown is that the
+     * issuer it names sealed it.
+     */
+    readonly verificationMethod: "https://www.w3.org/TR/vc-data-model#VERIFICATION_METHOD_ERROR";
+    readonly proofVerification: "https://www.w3.org/TR/vc-data-model#PROOF_VERIFICATION_ERROR";
+    /** The issuer's did:web document could not be fetched or read. */
+    readonly didWebUnresolved: "https://www.w3.org/TR/vc-data-model#DID_WEB_UNRESOLVED";
+    /** Something the signature check needed would not load. */
+    readonly httpError: "https://www.w3.org/TR/vc-data-model#HTTP_ERROR";
+    readonly issuerNotRegistered: "https://www.w3.org/TR/vc-data-model#ISSUER_NOT_REGISTERED";
+    readonly registryUnchecked: "https://www.w3.org/TR/vc-data-model#REGISTRY_UNCHECKED";
+    readonly schemaValidationFailed: "https://www.w3.org/TR/vc-data-model#SCHEMA_VALIDATION_FAILED";
+    /**
+     * The status list says so. The only thing that means "withdrawn" — with
+     * `requireIssuerSignedStatusList`, only while the list is the issuer's own
+     * (see `statusListIssuerMismatch`).
+     */
+    readonly revoked: "https://www.w3.org/TR/vc-data-model#CREDENTIAL_REVOKED";
+    /** As `revoked`, for the suspension bit: possibly temporary. */
+    readonly suspended: "https://www.w3.org/TR/vc-data-model#CREDENTIAL_SUSPENDED";
+    /**
+     * The withdrawal list was signed by someone other than the credential's
+     * issuer. verifier-core reports it as a warning and leaves `verified` alone,
+     * because some status services sign every list with their own DID, and says
+     * consumers who need the binding should treat it as decisive. Whoever
+     * controls the list's host could otherwise mark a credential withdrawn, or
+     * un-withdraw it. We treat it as decisive only with
+     * `requireIssuerSignedStatusList`, off for now because DCC's own status
+     * service is one of those services: see OutcomeOptions.
+     */
+    readonly statusListIssuerMismatch: "https://www.w3.org/TR/vc-data-model#STATUS_LIST_ISSUER_MISMATCH";
+};
+/**
+ * Every way the withdrawal check can fail *without* establishing a withdrawal:
+ * the list would not load, had expired, was not yet valid, did not verify, was
+ * the wrong type, or errored before reaching a verdict.
+ *
+ * 1.x reported all of this as one undifferentiated error, and we had to treat
+ * any failure as unknown to stay honest. 2.x names them, so the prefix is
+ * enough — and the default for an unrecognised `STATUS_LIST_*` type is still
+ * "we could not check", which is the safe direction.
+ */
+export declare const STATUS_LIST_PROBLEM_PREFIX = "https://www.w3.org/TR/vc-data-model#STATUS_LIST_";
+/**
+ * What the registry check found, as data: the payload on its outcome, on
+ * success and on failure alike, whenever the lookup ran. Until the 2.0.0
+ * betas this arrived only in prose and was read out of the message, which
+ * lost any registry whose name had a comma in it (verifier-core#32).
+ *
+ * `entity` is the registry's own record of the issuer. Not read yet: which
+ * name to show, the registry's or the credential's, is a wording decision.
+ */
+export interface RegistryReference {
+    name: string;
+    type: string;
+    url?: string;
+}
+export interface RegistryCheckPayload {
+    matches: {
+        registry: RegistryReference;
+        entity?: {
+            name?: string;
+            url?: string;
+            logo?: string;
+        };
+    }[];
+    uncheckedRegistries: RegistryReference[];
+}
+/**
+ * The three structural failures `context-check` reports, all under the title
+ * "Invalid JSON-LD" — so the title cannot tell a missing `@context` apart from
+ * vocabulary the processor could not read. These say the credential is put
+ * together wrong; anything else carrying json-ld in its prose is the
+ * processing failure, which has different advice because retrying cannot fix
+ * it. Raised on verifier-core#32.
+ */
+export declare const STRUCTURAL_CONTEXT_DETAILS: readonly ["No verifiable credential found in subject.", "Credential is missing required @context property.", "Credential @context property is empty."];
