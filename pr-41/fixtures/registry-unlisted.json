@@ -1,8 +1,0 @@
-{
-  "meta": {
-    "created": "2026-10-07T00:00:00Z",
-    "updated": "2026-10-07T00:00:00Z",
-    "note": "TEST ONLY — a registry that lists nobody, so the verifier-plugin demo page can show an issuer that is not on the list. Never configure this file as a registry in anything real."
-  },
-  "registry": {}
-}
