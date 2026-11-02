@@ -571,15 +571,18 @@ const NAMELESS: [string, unknown][] = [
  * Run in parts, one file each (consistency-1.test.ts onwards), each taking
  * every PARTS-th combination, so the files run side by side.
  *
- * Two Vitest limits apply here whatever the results. A test worker fails the
- * run, with every test passing ("Timeout calling onTaskUpdate"), when a
- * message to the main Vitest process waits 60 seconds for its reply to be
- * read, and tests that never wait never read one: as one file this suite
- * passed in 34 s on one CI run and failed at 70 s on the next (22 October
- * 2026). The pause after each test below lets the worker read its replies
- * however long a file runs; a part slowed to 74 s passes with it and fails
- * without. And any one test fails past 5 seconds, so the nameless-issuer
- * tests, which loop, are given longer.
+ * One Vitest limit applies here whatever the results, and a second applied
+ * on Vitest 3. There a test worker failed the run, with every test passing
+ * ("Timeout calling onTaskUpdate"), when a message to the main Vitest process
+ * waited 60 seconds for its reply to be read, and tests that never wait never
+ * read one: as one file this suite passed in 34 s on one CI run and failed at
+ * 70 s on the next (22 October 2026). The pause after each test below lets
+ * the worker read its replies however long a file runs; a part slowed to 74 s
+ * passed with it and failed without. Vitest 4.1.12 sets no time limit on those
+ * messages, and a part slowed to 83 s passes either way (2 November 2026). The
+ * pause stays in case a later Vitest brings the limit back; it adds about half
+ * a second to the suite. The limit that still applies: any one test fails past
+ * 5 seconds, so the nameless-issuer tests, which loop, are given longer.
  *
  * Each part takes its number from its file's name, so no two files can run
  * the same part; consistency.test.ts checks that every part has its file.
