@@ -161,6 +161,17 @@ export const PROBLEM = {
   didWebUnresolved: 'https://www.w3.org/TR/vc-data-model#DID_WEB_UNRESOLVED',
   /** Something the signature check needed would not load. */
   httpError: 'https://www.w3.org/TR/vc-data-model#HTTP_ERROR',
+  /**
+   * The content could not be put into the form the seal is computed over —
+   * on the signature check, usually a field its `@context` doesn't define
+   * ("Safe mode validation error"). The same answer every time.
+   */
+  parsingError: 'https://www.w3.org/TR/vc-data-model#PARSING_ERROR',
+  /**
+   * No seal on it is one this verifier can check: an unknown cryptosuite, or
+   * one made for another purpose. Also the same answer every time.
+   */
+  proofUnsupported: 'https://www.w3.org/TR/vc-data-model#PROOF_UNSUPPORTED',
   issuerNotRegistered: 'https://www.w3.org/TR/vc-data-model#ISSUER_NOT_REGISTERED',
   registryUnchecked: 'https://www.w3.org/TR/vc-data-model#REGISTRY_UNCHECKED',
   schemaValidationFailed: 'https://www.w3.org/TR/vc-data-model#SCHEMA_VALIDATION_FAILED',

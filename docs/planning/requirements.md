@@ -438,7 +438,11 @@ The consistency suite holds every verdict to this.
 The advice has to match the cause, though. For a **withdrawn** credential the
 issuer already made their decision, so the useful advice is to ask for a
 replacement. For a **signature that doesn't match**, a fresh copy genuinely
-helps. Those shouldn't share wording.
+helps. Those shouldn't share wording. Nor should a check that can never
+finish — a field the credential's vocabulary doesn't define, or a kind of
+seal we can't check — share "try again" with one that might: trying again
+gives the same answer every time, so it sends the person to the issuer
+instead (#40).
 
 ### Two accessibility rules
 

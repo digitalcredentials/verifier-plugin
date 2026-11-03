@@ -22,6 +22,8 @@ describe('the claim patterns themselves', () => {
     'The credential is untampered.',
     "Genuine, but we can't confirm who issued it",
     'It looks genuine.',
+    "It's genuine.",
+    "We checked whether it's signed, and it's genuine.",
     'Nothing has changed since it was issued.',
     "This credential hasn't been changed since it was issued.",
     "It hasn't been altered.",
@@ -52,6 +54,11 @@ describe('the claim patterns themselves', () => {
     "This copy is no longer valid. That doesn't always mean the achievement was taken back; issuers sometimes deactivate a copy to replace it, for example to correct a detail.",
     "This copy can't be relied on while it's on hold. This may be temporary.",
     "We couldn't check whether this copy is still active",
+    // A seal that can never be computed (#40).
+    "We can't check this credential",
+    "It contains something we don't recognise, so we can't tell whether it's genuine. This is usually a problem with how it was made.",
+    "It has a kind of digital signature we can't check, so we can't tell whether it's genuine.",
+    'Let the issuer know.',
   ])('does not read "%s" as a claim', (text) => {
     expect(text.toLowerCase()).not.toMatch(CLAIMS_UNCHANGED);
     expect(text.toLowerCase()).not.toMatch(CLAIMS_NOT_WITHDRAWN);
