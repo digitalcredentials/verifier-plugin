@@ -473,6 +473,16 @@ const isTampered = (checks: Map<string, CheckResult>): boolean =>
 const isKeyMismatch = (checks: Map<string, CheckResult>): boolean =>
   !isTampered(checks) && hasProblem(checks.get(CHECK.signature), PROBLEM.verificationMethod);
 
+/**
+ * No seal on it is one verifier-core can check. Every problem, as the library
+ * itself decides it: one unsupported seal beside a failure we can't name is
+ * still a failure we can't name.
+ */
+const onlyUnsupportedProofs = (check: CheckResult | undefined): boolean => {
+  const problems = problemsOf(check);
+  return problems.length > 0 && problems.every((p) => p.type === PROBLEM.proofUnsupported);
+};
+
 // ---------------------------------------------------------------------------
 // The issuer: a name, plus where the name came from
 // ---------------------------------------------------------------------------
@@ -695,13 +705,37 @@ export const COULD_NOT_CHECK = {
   action: TRY_AGAIN,
 } as const;
 
+/**
+ * A field the credential's vocabulary doesn't define, wherever it's found:
+ * while computing the seal (#40), or before it, a path 2.0.0-beta.1's
+ * context check doesn't reach but `unreadable_vocabulary` still covers. Same
+ * cause, same words. Not "read": the card shows the credential's title, so
+ * we plainly read it. "Usually" leaves room for a forgery, which adds such a
+ * field to soften "tampered", without accusing anyone.
+ */
+const UNRECOGNISED_CONTENT = {
+  headline: "We can't check this credential",
+  detail:
+    "It contains something we don't recognise, so we can't tell whether it's genuine. This is usually a problem with how it was made.",
+  action: 'Ask the issuer for a replacement.',
+} as const;
+
 const FATAL: Record<string, Omit<Outcome, 'code'>> = {
-  unreadable_vocabulary: {
-    severity: 'error',
-    headline: "We can't read this credential",
-    detail:
-      "It uses vocabulary we couldn't process, so none of it could be checked. This is usually a problem with how it was built.",
-    action: 'Ask the issuer for a replacement.',
+  unreadable_vocabulary: { severity: 'error', ...UNRECOGNISED_CONTENT },
+  // The same found at the seal, grey: the rows below it all read "not
+  // checked", and a red verdict needs a red row to show what's wrong. The
+  // words, not the colour, say trying again won't help.
+  signature_unreadable: { severity: 'unchecked', ...UNRECOGNISED_CONTENT },
+  // A seal of a kind verifier-core can't check (#40), or one made for
+  // another purpose. Grey for the same reason. Not "a replacement": a new
+  // copy would most likely carry the same kind of seal, and either way the
+  // issuer is who can fix it. Nor "yet": that promises support nobody has
+  // planned.
+  signature_unsupported: {
+    severity: 'unchecked',
+    headline: "We can't check this credential",
+    detail: "It has a kind of digital signature we can't check, so we can't tell whether it's genuine.",
+    action: 'Let the issuer know.',
   },
   invalid_jsonld: {
     severity: 'error',
@@ -1038,12 +1072,24 @@ export const summarise = (r: VerificationResponse, options: OutcomeOptions = {})
   // and verifier-core halts the withdrawal check after it, so "the withdrawal
   // check never ran" would be true but beside the point. Everything below
   // this has a seal that held.
+  //
+  // Two reasons the seal can't be computed are permanent, and "try again"
+  // would be advice that never works (#40): a field the vocabulary doesn't
+  // define, and a kind of seal verifier-core can't check. While both fell
+  // through to the catch-all, a forger could turn red "tampered" into grey
+  // "try again" by adding one made-up field; it still turns grey, but no
+  // longer blames a glitch. A reason that may pass still comes first: while
+  // the issuer's site is down, trying again is the right advice.
   if (!sealHeld(checks)) {
     const code = hasProblem(signature, PROBLEM.didWebUnresolved)
       ? 'did_web_unresolved'
       : hasProblem(signature, PROBLEM.httpError)
         ? 'http_error_with_signature_check'
-        : undefined;
+        : hasProblem(signature, PROBLEM.parsingError)
+          ? 'signature_unreadable'
+          : onlyUnsupportedProofs(signature)
+            ? 'signature_unsupported'
+            : undefined;
     return code ? { code, ...FATAL[code]! } : { code: 'signature_unchecked', ...UNCHECKED_SIGNATURE };
   }
 

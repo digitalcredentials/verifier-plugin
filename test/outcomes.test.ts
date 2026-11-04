@@ -2079,3 +2079,80 @@ describe('findings from the review of the verifier-core main adaptation', () => 
     expect(out.action).not.toContain('Try again');
   });
 });
+
+describe('a seal that can never be computed (#40)', () => {
+  const NOT_RUN = (id: string) => `Not run: ${id} failed`;
+  const sealFailed = (...problems: [string, string][]): VerificationResponse => {
+    const r = ok();
+    set(r, fail(CHECK.signature, problems.map(([type, detail]) => ({ type, title: 't', detail })), true));
+    set(r, skip(CHECK.status, NOT_RUN('proof.signature')));
+    return r;
+  };
+  const UNDEFINED_FIELD: [string, string] = [PROBLEM.parsingError, 'Safe mode validation error.'];
+  const UNKNOWN_SEAL: [string, string] = [PROBLEM.proofUnsupported, "This verifier does not support this proof's cryptosuite."];
+
+  it('says a field the vocabulary does not define is permanent, without saying tampered', () => {
+    // Adding one such field to a tampered credential used to turn its red
+    // "tampered" into grey "try again". It is still grey, since every row
+    // below reads "not checked", but it no longer blames a glitch, and neither
+    // accuses nor reassures: a carelessly built genuine credential lands here
+    // too.
+    expect(summarise(sealFailed(UNDEFINED_FIELD))).toEqual({
+      code: 'signature_unreadable',
+      severity: 'unchecked',
+      headline: "We can't check this credential",
+      detail:
+        "It contains something we don't recognise, so we can't tell whether it's genuine. This is usually a problem with how it was made.",
+      action: 'Ask the issuer for a replacement.',
+    });
+  });
+
+  it('says a kind of seal we cannot check is permanent, and sends the earner to the issuer', () => {
+    // Not "a replacement": a new copy would carry the same kind of seal.
+    expect(summarise(sealFailed(UNKNOWN_SEAL))).toEqual({
+      code: 'signature_unsupported',
+      severity: 'unchecked',
+      headline: "We can't check this credential",
+      detail: "It has a kind of digital signature we can't check, so we can't tell whether it's genuine.",
+      action: 'Let the issuer know.',
+    });
+  });
+
+  it.each([
+    ['an undefined field', UNDEFINED_FIELD],
+    ['an unknown kind of seal', UNKNOWN_SEAL],
+  ])('leaves the breakdown saying the seal was not checked, for %s', (_, problem) => {
+    const r = sealFailed(problem);
+    const out = summarise(r);
+    expect(`${out.headline} ${out.detail} ${out.action}`).not.toMatch(/tamper|try again/i);
+    expect(row(r, CHECK.signature)).toMatchObject({ severity: 'unchecked', value: 'not checked' });
+    expect(row(r, CHECK.registeredIssuer)?.value).toBe("can't confirm — we couldn't check the digital signature");
+  });
+
+  it('words an undefined field the same whichever check finds it', () => {
+    // Same cause, same words: before the seal, or while computing it. Only
+    // the colour differs: caught early there is no breakdown, so it stays red.
+    const { code: _, severity: early, ...earlyWords } = summarise(stoppedAt(CHECK.contextExists, 'Invalid JSON-LD'));
+    const { code: __, severity: atSeal, ...atSealWords } = summarise(sealFailed(UNDEFINED_FIELD));
+    expect(atSealWords).toEqual(earlyWords);
+    expect([early, atSeal]).toEqual(['error', 'unchecked']);
+  });
+
+  it.each([
+    ['the issuer website', PROBLEM.didWebUnresolved, 'did_web_unresolved'],
+    ['something else it needed', PROBLEM.httpError, 'http_error_with_signature_check'],
+  ])('still says try again when %s did not load as well', (_, type, code) => {
+    // A reason that may pass outranks one that won't.
+    expect(summarise(sealFailed(UNDEFINED_FIELD, [type, 'd'])).code).toBe(code);
+    expect(summarise(sealFailed(UNKNOWN_SEAL, [type, 'd'])).code).toBe(code);
+  });
+
+  it('keeps the catch-all when an unknown seal sits beside a failure we cannot name', () => {
+    expect(summarise(sealFailed(UNKNOWN_SEAL, [PROBLEM.proofVerification, 'd'])).code).toBe('signature_unchecked');
+  });
+
+  it('still says tampered when one seal of two does not match and the other cannot be computed', () => {
+    // The library reports both for such a proof set; the finding wins.
+    expect(summarise(sealFailed([PROBLEM.invalidSignature, 'd'], UNDEFINED_FIELD)).code).toBe('invalid_signature');
+  });
+});

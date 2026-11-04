@@ -12,11 +12,12 @@ import type { VerificationResponse, CheckResult } from '../src/types.js';
  * tampering detected") is still a reassurance. The old "changed since it was
  * issued" phrasings stay, because a claim written the old way is still a
  * claim. "Genuine" counts unless it is asked about — "we can't tell if this is
- * genuine" is the opposite of a claim, and dropping the word instead would
- * stop this seeing "Genuine, but we can't confirm who issued it".
+ * genuine", or "whether it's genuine", is the opposite of a claim, and
+ * dropping the word instead would stop this seeing "Genuine, but we can't
+ * confirm who issued it".
  */
 export const CLAIMS_UNCHANGED =
-  /(?<!\b(?:if|whether) (?:this|it) is )\b(?:genuine|authentic)\b|n['’]t been (?:tampered|changed|altered|modified)|\bnot been (?:tampered|changed|altered|modified)|was(?:n['’]t| not) (?:tampered|changed|altered|modified)|\bun(?:tampered|altered|modified|changed)\b|\bintact\b|\bno tampering\b|\bnothing has changed/;
+  /(?<!\b(?:if|whether) (?:this|it) is |\b(?:if|whether) (?:this|it)['’]s )\b(?:genuine|authentic)\b|n['’]t been (?:tampered|changed|altered|modified)|\bnot been (?:tampered|changed|altered|modified)|was(?:n['’]t| not) (?:tampered|changed|altered|modified)|\bun(?:tampered|altered|modified|changed)\b|\bintact\b|\bno tampering\b|\bnothing has changed/;
 // The earner reads "deactivated" now (8 October 2026), so that counts too,
 // however the object is put ("it", "this copy"). "Still active" counts
 // unless it is asked about: "We couldn't check whether this copy is still
@@ -56,8 +57,11 @@ export const LEANS_POSITIVE =
 /**
  * Every way the signature check can end. Since verifier-core #59 a key that
  * isn't the issuer's has its own problem type, apart from tampering.
+ * `undefined_field` and `unsupported` are the two seals that can never be
+ * computed: a field the vocabulary doesn't define, and a kind of seal the
+ * library can't check (#40).
  */
-type Sig = 'passed' | 'tampered' | 'key_mismatch' | 'unattributable' | 'missing';
+type Sig = 'passed' | 'tampered' | 'key_mismatch' | 'unattributable' | 'undefined_field' | 'unsupported' | 'missing';
 /**
  * The validity period, a check of its own since 2.0.0-beta.1: before, the
  * dates were judged inside the signature check. The end date stays a
@@ -113,7 +117,7 @@ type Sch = 'valid' | 'invalid' | 'no_schema' | 'unavailable' | 'missing' | 'halt
  */
 const NOT_RUN = 'Not run: proof.signature failed';
 
-const SIGNATURES: Sig[] = ['passed', 'tampered', 'key_mismatch', 'unattributable', 'missing'];
+const SIGNATURES: Sig[] = ['passed', 'tampered', 'key_mismatch', 'unattributable', 'undefined_field', 'unsupported', 'missing'];
 const VALIDITIES: Val[] = ['in_date', 'expired', 'not_yet_valid', 'errored', 'halted', 'missing'];
 const REVOCATIONS: Rev[] = [
   'passed',
@@ -195,6 +199,32 @@ const signatureCheck = (sig: Sig): CheckResult | undefined => {
               type: PROBLEM.proofVerification,
               title: 'No Applicable Crypto Service',
               detail: 'No registered crypto service can verify this subject.',
+            },
+          ],
+        },
+        true,
+      );
+    case 'undefined_field':
+      return check(
+        CHECK.signature,
+        {
+          status: 'failure',
+          problems: [
+            { type: PROBLEM.parsingError, title: 'JSON-LD Validation Error', detail: 'Safe mode validation error.' },
+          ],
+        },
+        true,
+      );
+    case 'unsupported':
+      return check(
+        CHECK.signature,
+        {
+          status: 'failure',
+          problems: [
+            {
+              type: PROBLEM.proofUnsupported,
+              title: 'Unsupported Proof',
+              detail: "This verifier does not support this proof's cryptosuite.",
             },
           ],
         },
@@ -521,7 +551,7 @@ const listsFor = (rev: Rev): Lists[] =>
  * contradiction in the input, not a combination the rules owe an answer to,
  * so it is left out — everything else, possible or not, stays in.
  */
-const SIG_FATAL: Sig[] = ['tampered', 'key_mismatch', 'unattributable'];
+const SIG_FATAL: Sig[] = ['tampered', 'key_mismatch', 'unattributable', 'undefined_field', 'unsupported'];
 const coherent = (sig: Sig, val: Val, rev: Rev, iss: Iss, sch: Sch): boolean =>
   SIG_FATAL.includes(sig) || ![val, rev, iss, sch].includes('halted');
 
@@ -837,6 +867,8 @@ export const agreementTests = (file: string): void => {
         signature_unchecked: [CHECK.signature, 'unchecked'],
         did_web_unresolved: [CHECK.signature, 'unchecked'],
         http_error_with_signature_check: [CHECK.signature, 'unchecked'],
+        signature_unreadable: [CHECK.signature, 'unchecked'],
+        signature_unsupported: [CHECK.signature, 'unchecked'],
         withdrawn: [CHECK.status, 'error'],
         suspended: [CHECK.status, 'error'],
         withdrawal_unknown: [CHECK.status, 'unchecked'],
@@ -846,6 +878,20 @@ export const agreementTests = (file: string): void => {
         key_mismatch: [CHECK.registeredIssuer, 'error'],
         malformed: [CHECK.schema, 'warning'],
       };
+      // A seal that can never be computed says so (#40): trying again would
+      // give the same answer every time. Unless the schema check reported a
+      // finding, which leads over every unknown about the seal, as it does
+      // for `signature_unchecked`; the library halts that check after a
+      // failed seal, so only these combinations can reach it.
+      if (sig === 'undefined_field' || sig === 'unsupported') {
+        if (sch !== 'invalid') {
+          expect(out.code, `${where}: a seal that can never be computed`).toBe(
+            sig === 'undefined_field' ? 'signature_unreadable' : 'signature_unsupported',
+          );
+        }
+        expect(out.action ?? '', `${where}: sends someone back to try again for good`).not.toMatch(/try again/i);
+      }
+
       const expected = expectations[out.code];
       if (expected) {
         const [id, severity] = expected;

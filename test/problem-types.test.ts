@@ -147,3 +147,23 @@ describe('a credential the library rejects for its shape', () => {
     expect(summarise(r).code).toBe('invalid_structure');
   });
 });
+
+/**
+ * A seal that can never be computed (#40). Both outcomes rest on the library
+ * keeping these two types: if it renamed either, a forgery with one made-up
+ * field would quietly go back to "try again", and only this would notice.
+ */
+describe('a seal that can never be computed', () => {
+  it('reports a field the vocabulary does not define as a parsing error, and we say so', async () => {
+    const r = await verify({ ...fixture('tampered'), notInAnyContext: 'x' });
+    expect(problemTypes(r, CHECK.signature)).toEqual([PROBLEM.parsingError]);
+    expect(summarise(r).code).toBe('signature_unreadable');
+  });
+
+  it('reports a kind of seal it cannot check as unsupported, and we say so', async () => {
+    const sealed = fixture('verified');
+    const r = await verify({ ...sealed, proof: { ...(sealed['proof'] as Record<string, unknown>), type: 'MadeUpSignature2026' } });
+    expect(problemTypes(r, CHECK.signature)).toEqual([PROBLEM.proofUnsupported]);
+    expect(summarise(r).code).toBe('signature_unsupported');
+  });
+});
