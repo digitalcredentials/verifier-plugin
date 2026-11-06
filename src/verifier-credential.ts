@@ -179,15 +179,23 @@ const styles = `
           color: var(--vp-ink-2, #47536a); overflow: auto; max-height: 460px; white-space: pre; }
   .check { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 16px;
            padding: 7px 0; font-size: .9rem; border-bottom: 1px solid var(--vp-rule, #d9dee7); }
-  @container (max-width: 380px) { .check { grid-template-columns: 1fr; } }
   .check:last-child { border-bottom: 0; }
   .check .k { color: var(--vp-ink-2, #47536a); }
   /* The mark sits inline, at the start of the value's first line. As a flex
      item beside the text, it stayed at the left edge once the text wrapped,
-     a column away from the right-aligned words it belongs to. A word too long
-     for the row, such as an issuer's did:key, breaks rather than running off
-     the card; the mark then sits just above it. */
-  .check .v { text-align: right; font-weight: 500; overflow-wrap: anywhere; }
+     a column away from the words it belongs to. A word too long for the row,
+     such as an issuer's did:key, breaks rather than running off the card; the
+     mark then sits just above it. Start and end, not left and right, so a
+     right-to-left page mirrors the layout rather than breaking it. */
+  .check .v { text-align: end; font-weight: 500; overflow-wrap: anywhere; }
+  /* A narrow card, as on a phone, stacks each row: the label, then its value
+     on the line under it, starting where the label does. Aligned to the
+     end, a short value sat at the far edge, away from its label, and a long one
+     wrapped ragged. After .check .v, so its text-align wins. */
+  @container (max-width: 380px) {
+    .check { grid-template-columns: 1fr; }
+    .check .v { text-align: start; }
+  }
   .mark { width: 15px; height: 15px; border-radius: 50%; display: inline-grid; place-items: center;
           font-size: 10px; font-weight: 700; color: #fff; vertical-align: 2px; margin-right: 2px; }
   .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
