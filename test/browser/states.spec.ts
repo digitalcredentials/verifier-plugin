@@ -268,16 +268,74 @@ test("a value too long for the row, such as an issuer's did:key, stays inside th
     const first = range.getClientRects()[0]!;
     return {
       fits: card.scrollWidth <= card.clientWidth,
-      // Too long to sit beside it, so on the line just above, at the right
+      // Too long to sit beside it, so on the line just above, at the left
+      // where the identifier starts (the rows stack at this width)
       above: first.top - mark.bottom,
-      fromRight: Math.abs(mark.right - first.right),
+      fromLeft: Math.abs(mark.left - first.left),
     };
   });
   expect(layout.fits, 'the identifier runs off the card').toBe(true);
   expect(layout.above, 'the mark is not just above the identifier').toBeGreaterThanOrEqual(-2);
   expect(layout.above, 'the mark is not just above the identifier').toBeLessThan(10);
-  expect(layout.fromRight, 'the mark is not at the right, over the identifier').toBeLessThan(10);
+  expect(layout.fromLeft, 'the mark is not at the left, over the identifier').toBeLessThan(10);
 });
+
+/**
+ * Where each value starts, against its label and its row. In a narrow card
+ * (380px or less) each row stacks, label over value; a wide card keeps them
+ * side by side.
+ */
+const valueEdges = (page: Page) =>
+  page.evaluate(() =>
+    [...document.getElementById('vc')!.shadowRoot!.querySelectorAll('.check')].map((row) => {
+      const label = row.querySelector('.k')!.getBoundingClientRect();
+      const mark = row.querySelector('.mark')!.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(row.querySelector('.mark + span')!.lastChild!);
+      const lines = [...range.getClientRects()];
+      return {
+        label: row.querySelector('.k')!.textContent,
+        below: mark.top >= label.bottom - 1,
+        fromLabelLeft: Math.abs(mark.left - label.left),
+        fromLabelRight: Math.abs(mark.right - label.right),
+        fromRowRight: Math.abs(row.getBoundingClientRect().right - lines[lines.length - 1]!.right),
+      };
+    }),
+  );
+
+test('stacked in a right-to-left page, each value starts under its label, at the right', async ({ page }) => {
+  // The alignment is start and end, not left and right, so it follows the
+  // page's direction. The mark's 2px margin is on its right whichever way.
+  await page.setViewportSize({ width: 360, height: 900 });
+  await page.evaluate(() => document.documentElement.setAttribute('dir', 'rtl'));
+  await pick(page, 'Verified');
+  for (const r of await valueEdges(page)) {
+    expect(r.below, `${r.label}: the value is not under its label`).toBe(true);
+    expect(r.fromLabelRight, `${r.label}: the value does not start under its label`).toBeLessThan(3);
+  }
+});
+
+for (const situation of ['Verified', 'Registry offline']) {
+  test(`stacked on a phone, each value starts under its label (${situation})`, async ({ page }) => {
+    // Right-aligned under a label at the left, a short value sat at the far
+    // edge of the card and a long one wrapped ragged, away from its label
+    await page.setViewportSize({ width: 360, height: 900 });
+    await pick(page, situation);
+    for (const r of await valueEdges(page)) {
+      expect(r.below, `${r.label}: the value is not under its label`).toBe(true);
+      expect(r.fromLabelLeft, `${r.label}: the value does not start under its label`).toBeLessThan(1);
+    }
+  });
+
+  test(`side by side in a wide card, each value keeps to the right (${situation})`, async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 900 });
+    await pick(page, situation);
+    for (const r of await valueEdges(page)) {
+      expect(r.below, `${r.label}: the value went under its label`).toBe(false);
+      expect(r.fromRowRight, `${r.label}: the value does not end at the right`).toBeLessThan(1);
+    }
+  });
+}
 
 /**
  * Found in review. The spoken headline was HTML-escaped on its way into a
