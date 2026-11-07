@@ -214,9 +214,9 @@ test('an unreachable registry reads differently from an unlisted issuer', async 
 });
 
 /**
- * On a phone the Details rows stack and long values wrap. The mark beside a
- * value used to stay at the row's left edge once its text wrapped, a column
- * away from the right-aligned words it belongs to.
+ * On a phone the Details rows stack and long values wrap. When the words were
+ * still right-aligned there, the mark beside a value stayed at the row's left
+ * edge once its text wrapped, a column away from the words it belongs to.
  */
 const rowLayout = (page: Page) =>
   page.evaluate(() =>
@@ -251,34 +251,103 @@ for (const situation of ['Registry offline', 'Not their seal']) {
   });
 }
 
-test("a value too long for the row, such as an issuer's did:key, stays inside the card", async ({ page }) => {
-  await page.setViewportSize({ width: 360, height: 900 });
-  await pick(page, 'Issuer unknown');
-  const layout = await page.evaluate(() => {
-    const root = document.getElementById('vc')!.shadowRoot!;
-    // An issuer with no name is shown by its identifier, which no demo
-    // credential has; the Issuer row is given one to lay out.
-    const row = [...root.querySelectorAll('.check')].find((r) => r.querySelector('.k')!.textContent === 'Issuer')!;
-    const text = row.querySelector('.mark + span')!.lastChild!;
-    text.textContent = 'did:key:z6MknNQD1WHLGGraFi6zcbGevuAgkVfdyCdtZnQTGWVVvR5Q — not on our list of known issuers';
-    const card = root.querySelector('.card')!;
-    const mark = row.querySelector('.mark')!.getBoundingClientRect();
-    const range = document.createRange();
-    range.selectNodeContents(text);
-    const first = range.getClientRects()[0]!;
-    return {
-      fits: card.scrollWidth <= card.clientWidth,
-      // Too long to sit beside it, so on the line just above, at the left
-      // where the identifier starts (the rows stack at this width)
-      above: first.top - mark.bottom,
-      fromLeft: Math.abs(mark.left - first.left),
-    };
+/**
+ * The mark is a bullet: it stays on its value's first line, and every line of
+ * the value starts just after it. As an inline box in the text, it was left
+ * alone on a line above a word too long to fit beside it, such as an issuer's
+ * did:key, and a wrapped value's next line started back under it.
+ */
+for (const [width, rows] of [
+  [360, 'stacked'],
+  [1024, 'side by side'],
+] as const) {
+  test(`an issuer's did:key starts beside its mark and stays inside the card (${rows})`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await pick(page, 'Issuer unknown');
+    const layout = await page.evaluate(() => {
+      const root = document.getElementById('vc')!.shadowRoot!;
+      // An issuer with no name is shown by its identifier, which no demo
+      // credential has; the Issuer row is given one to lay out.
+      const row = [...root.querySelectorAll('.check')].find((r) => r.querySelector('.k')!.textContent === 'Issuer')!;
+      const text = row.querySelector('.mark + span')!.lastChild!;
+      text.textContent = 'did:key:z6MknNQD1WHLGGraFi6zcbGevuAgkVfdyCdtZnQTGWVVvR5Q — not on our list of known issuers';
+      const card = root.querySelector('.card')!;
+      const mark = row.querySelector('.mark')!.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(text);
+      const rects = [...range.getClientRects()];
+      const first = rects[0]!;
+      return {
+        wrapped: rects.some((r) => r.top > first.bottom - 2),
+        stacked: mark.top >= row.querySelector('.k')!.getBoundingClientRect().bottom - 1,
+        fits: card.scrollWidth <= card.clientWidth,
+        sameLine: Math.abs(mark.top + mark.height / 2 - (first.top + first.height / 2)) < 6,
+        gap: first.left - mark.right,
+        squashed: Math.abs(mark.width - mark.height) > 0.5,
+      };
+    });
+    expect(layout.stacked, 'not the layout this case is for').toBe(rows === 'stacked');
+    expect(layout.wrapped, 'the identifier did not wrap').toBe(true);
+    expect(layout.fits, 'the identifier runs off the card').toBe(true);
+    expect(layout.sameLine, 'the mark is on a line of its own').toBe(true);
+    expect(layout.gap, 'gap between the mark and the identifier').toBeGreaterThanOrEqual(0);
+    expect(layout.gap, 'gap between the mark and the identifier').toBeLessThan(10);
+    // Beside words that fill the line, a flex item may shrink; the mark must not
+    expect(layout.squashed, 'the mark is squashed out of round').toBe(false);
   });
-  expect(layout.fits, 'the identifier runs off the card').toBe(true);
-  expect(layout.above, 'the mark is not just above the identifier').toBeGreaterThanOrEqual(-2);
-  expect(layout.above, 'the mark is not just above the identifier').toBeLessThan(10);
-  expect(layout.fromLeft, 'the mark is not at the left, over the identifier').toBeLessThan(10);
-});
+}
+
+// Side by side at 480px: the element is about 440px wide (the demo page pads
+// it), over the 380px stacking width, yet the Issuer value still wraps.
+for (const [width, rows, dir] of [
+  [360, 'stacked', 'ltr'],
+  [360, 'stacked', 'rtl'],
+  [480, 'side by side', 'ltr'],
+] as const) {
+  test(`a wrapped value's lines all start where its first line does, just after the mark (${rows}, ${dir})`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.evaluate((d) => document.documentElement.setAttribute('dir', d), dir);
+    await pick(page, 'Issuer unknown');
+    const found = await page.evaluate(
+      (rtl) =>
+        [...document.getElementById('vc')!.shadowRoot!.querySelectorAll('.check')].map((row) => {
+          const label = row.querySelector('.k')!.getBoundingClientRect();
+          const mark = row.querySelector('.mark')!.getBoundingClientRect();
+          const range = document.createRange();
+          range.selectNodeContents(row.querySelector('.mark + span')!.lastChild!);
+          // Where each line starts: its left edge, or its right in a right-to-left
+          // page. A line can come back as several rectangles, one per run of
+          // text in one direction, so they are grouped by line first.
+          const lines: { top: number; start: number }[] = [];
+          for (const r of [...range.getClientRects()].sort((a, b) => a.top - b.top)) {
+            const start = rtl ? r.right : r.left;
+            const line = lines.find((l) => Math.abs(l.top - r.top) < 2);
+            if (!line) lines.push({ top: r.top, start });
+            else line.start = rtl ? Math.max(line.start, start) : Math.min(line.start, start);
+          }
+          const starts = lines.map((l) => l.start);
+          return {
+            label: row.querySelector('.k')!.textContent,
+            stacked: mark.top >= label.bottom - 1,
+            squashed: Math.abs(mark.width - mark.height) > 0.5,
+            gap: rtl ? mark.left - starts[0]! : starts[0]! - mark.right,
+            starts,
+          };
+        }),
+      dir === 'rtl',
+    );
+    expect(found.find((r) => r.label === 'Issuer')!.starts.length, 'the Issuer value did not wrap').toBeGreaterThan(1);
+    for (const r of found) {
+      expect(r.stacked, `${r.label}: not the layout this case is for`).toBe(rows === 'stacked');
+      expect(r.squashed, `${r.label}: the mark is squashed out of round`).toBe(false);
+      expect(r.gap, `${r.label}: gap between the mark and its first line`).toBeGreaterThanOrEqual(0);
+      expect(r.gap, `${r.label}: gap between the mark and its first line`).toBeLessThan(10);
+      for (const start of r.starts.slice(1)) {
+        expect(Math.abs(start - r.starts[0]!), `${r.label}: a wrapped line starts elsewhere`).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+}
 
 /**
  * Where each value starts, against its label and its row. In a narrow card
@@ -292,26 +361,37 @@ const valueEdges = (page: Page) =>
       const mark = row.querySelector('.mark')!.getBoundingClientRect();
       const range = document.createRange();
       range.selectNodeContents(row.querySelector('.mark + span')!.lastChild!);
-      const lines = [...range.getClientRects()];
+      const rects = [...range.getClientRects()];
+      const wrapped = rects.some((r) => r.top > rects[0]!.bottom - 2);
+      // The value's far edge: its text, while it is one line; once it wraps,
+      // its lines start after the mark and end raggedly, so the words' box,
+      // which then reaches across to the row's end
+      const box = row.querySelector('.mark + span')!.getBoundingClientRect();
+      const far = wrapped
+        ? { left: box.left, right: box.right }
+        : { left: Math.min(...rects.map((r) => r.left)), right: Math.max(...rects.map((r) => r.right)) };
+      const rowBox = row.getBoundingClientRect();
       return {
         label: row.querySelector('.k')!.textContent,
         below: mark.top >= label.bottom - 1,
         fromLabelLeft: Math.abs(mark.left - label.left),
         fromLabelRight: Math.abs(mark.right - label.right),
-        fromRowRight: Math.abs(row.getBoundingClientRect().right - lines[lines.length - 1]!.right),
+        fromRowRight: Math.abs(rowBox.right - far.right),
+        fromRowLeft: Math.abs(rowBox.left - far.left),
       };
     }),
   );
 
 test('stacked in a right-to-left page, each value starts under its label, at the right', async ({ page }) => {
   // The alignment is start and end, not left and right, so it follows the
-  // page's direction. The mark's 2px margin is on its right whichever way.
+  // page's direction. So is the gap after the mark, so the mark starts
+  // exactly under its label, as it does left to right.
   await page.setViewportSize({ width: 360, height: 900 });
   await page.evaluate(() => document.documentElement.setAttribute('dir', 'rtl'));
   await pick(page, 'Verified');
   for (const r of await valueEdges(page)) {
     expect(r.below, `${r.label}: the value is not under its label`).toBe(true);
-    expect(r.fromLabelRight, `${r.label}: the value does not start under its label`).toBeLessThan(3);
+    expect(r.fromLabelRight, `${r.label}: the value does not start under its label`).toBeLessThan(1);
   }
 });
 
@@ -334,6 +414,63 @@ for (const situation of ['Verified', 'Registry offline']) {
       expect(r.below, `${r.label}: the value went under its label`).toBe(false);
       expect(r.fromRowRight, `${r.label}: the value does not end at the right`).toBeLessThan(1);
     }
+  });
+}
+
+test("a host page that centres its text doesn't move the rows", async ({ page }) => {
+  // text-align is inherited into the card; centred, a stacked label sat in
+  // the middle of the row while its value started at the edge
+  await page.setViewportSize({ width: 360, height: 900 });
+  await page.evaluate(() => (document.getElementById('vc')!.style.textAlign = 'center'));
+  await pick(page, 'Verified');
+  const rows = await page.evaluate(() =>
+    [...document.getElementById('vc')!.shadowRoot!.querySelectorAll('.check')].map((row) => {
+      // The label's words, not its box, which spans the row however its
+      // words are aligned
+      const range = document.createRange();
+      range.selectNodeContents(row.querySelector('.k')!);
+      return {
+        label: row.querySelector('.k')!.textContent,
+        fromLabelText: Math.abs(row.querySelector('.mark')!.getBoundingClientRect().left - range.getBoundingClientRect().left),
+      };
+    }),
+  );
+  for (const r of rows) expect(r.fromLabelText, `${r.label}: the value does not start under its label`).toBeLessThan(1);
+});
+
+test('side by side in a right-to-left page, each value keeps to the left', async ({ page }) => {
+  // The row's end, mirrored: the value is placed by start and end, not by
+  // left and right
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await page.evaluate(() => document.documentElement.setAttribute('dir', 'rtl'));
+  await pick(page, 'Registry offline');
+  for (const r of await valueEdges(page)) {
+    expect(r.below, `${r.label}: the value went under its label`).toBe(false);
+    expect(r.fromRowLeft, `${r.label}: the value does not end at the left`).toBeLessThan(1);
+  }
+});
+
+for (const width of [1024, 480]) {
+  test(`words that cannot break never push the mark over the label (${width}px)`, async ({ page }) => {
+    // A host page that sets white-space: nowrap, which the card inherits,
+    // stands in for any words that cannot break, as in a browser without
+    // overflow-wrap: anywhere. They may run past the row's end, as before
+    // this layout; they must not run back over the label (or, further, off
+    // the card's start).
+    await page.setViewportSize({ width, height: 900 });
+    await pick(page, 'Issuer unknown');
+    const layout = await page.evaluate(() => {
+      const host = document.getElementById('vc')!;
+      host.style.whiteSpace = 'nowrap';
+      const root = host.shadowRoot!;
+      const row = [...root.querySelectorAll('.check')].find((r) => r.querySelector('.k')!.textContent === 'Issuer')!;
+      row.querySelector('.mark + span')!.lastChild!.textContent =
+        'did:key:z6MknNQD1WHLGGraFi6zcbGevuAgkVfdyCdtZnQTGWVVvR5Q — not on our list of known issuers';
+      const label = row.querySelector('.k')!.getBoundingClientRect();
+      const mark = row.querySelector('.mark')!.getBoundingClientRect();
+      return { overLabel: mark.left < label.right };
+    });
+    expect(layout.overLabel, 'the mark is over the label').toBe(false);
   });
 }
 
@@ -741,6 +878,25 @@ test.describe('lifecycle, from review', () => {
     );
     expect(spoken).toContain('Passed:');
     expect(spoken).not.toContain('Verified:');
+  });
+
+  test('each detail row is read out as its label, its status word and its value, without the mark', async ({ page }) => {
+    // The mark is laid out beside the words, not among them; how it is laid
+    // out must not run the words together or have the mark read out.
+    for (const situation of ['Issuer unknown', 'Not their seal']) {
+      await pick(page, situation);
+      const rows = page.locator('#vc .check');
+      for (let i = 0; i < (await rows.count()); i++) {
+        const row = rows.nth(i);
+        const snapshot = (await row.ariaSnapshot()).replace(/^- text: /, '');
+        const spoken = snapshot.startsWith('"') ? (JSON.parse(snapshot) as string) : snapshot;
+        const label = await row.locator('.k').textContent();
+        const words = (await row.locator('.mark + span').textContent())!.replace(/\s+/g, ' ').trim();
+        expect(words, `${situation}, ${label}: no status word`).toMatch(/^[A-Z][^:]*: \S/);
+        expect(spoken, `${situation}, ${label}`).toBe(`${label} ${words}`);
+        await expect(row.locator('.mark')).toHaveAttribute('aria-hidden', 'true');
+      }
+    }
   });
 
   test('the verdict is written into a live region that was already on the page', async ({ page }) => {

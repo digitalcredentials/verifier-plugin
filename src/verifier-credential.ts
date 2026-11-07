@@ -177,27 +177,40 @@ const styles = `
   .problem-detail { color: var(--vp-ink-2, #47536a); margin-top: 3px; }
   .json { margin: 0; padding: 14px; background: var(--vp-surface-2, #f7f9fb); font-size: .76rem; line-height: 1.55;
           color: var(--vp-ink-2, #47536a); overflow: auto; max-height: 460px; white-space: pre; }
-  .check { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 16px;
+  /* text-align is set, not inherited, so a host page's alignment does not
+     reach the rows: a centred page would centre each label away from its value. */
+  .check { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 16px; text-align: start;
            padding: 7px 0; font-size: .9rem; border-bottom: 1px solid var(--vp-rule, #d9dee7); }
   .check:last-child { border-bottom: 0; }
   .check .k { color: var(--vp-ink-2, #47536a); }
-  /* The mark sits inline, at the start of the value's first line. As a flex
-     item beside the text, it stayed at the left edge once the text wrapped,
-     a column away from the words it belongs to. A word too long for the row,
-     such as an issuer's did:key, breaks rather than running off the card; the
-     mark then sits just above it. Start and end, not left and right, so a
-     right-to-left page mirrors the layout rather than breaking it. */
-  .check .v { text-align: end; font-weight: 500; overflow-wrap: anywhere; }
+  /* The mark is a bullet: a flex item beside the words, on their first line,
+     with every line of the words starting just after it. Laid out inline, as
+     part of the text, it was left alone on a line above a word too long to
+     fit beside it, such as an issuer's did:key, and a wrapped value's next
+     line started back under it. The words break within their own lines rather
+     than running off the card.
+     Side by side, the mark and words together sit at the row's end, but the
+     words still start from the mark: aligned to the end, a wrapped value's
+     shorter first line was pushed away from it. Start and end, not left and
+     right, so a right-to-left page mirrors the layout rather than breaking it. */
+  .check .v { display: flex; align-items: baseline; justify-content: flex-end; gap: 6px;
+              font-weight: 500; overflow-wrap: anywhere; }
+  /* Without this, words that cannot break (a browser without overflow-wrap:
+     anywhere, such as Safari before 15.4, or a host page setting white-space:
+     nowrap) keep their full width, and flex-end pushes the mark and words
+     back over the label and off the card's start edge. */
+  .check .v > .mark + span { min-width: 0; }
   /* A narrow card, as on a phone, stacks each row: the label, then its value
-     on the line under it, starting where the label does. Aligned to the
-     end, a short value sat at the far edge, away from its label, and a long one
-     wrapped ragged. After .check .v, so its text-align wins. */
+     on the line under it, starting where the label does. At the row's end, a
+     short value sat at the far edge, away from its label. After .check .v,
+     so its alignment wins. */
   @container (max-width: 380px) {
     .check { grid-template-columns: 1fr; }
-    .check .v { text-align: start; }
+    .check .v { justify-content: flex-start; }
   }
-  .mark { width: 15px; height: 15px; border-radius: 50%; display: inline-grid; place-items: center;
-          font-size: 10px; font-weight: 700; color: #fff; vertical-align: 2px; margin-right: 2px; }
+  /* Raised 2px off the words' baseline, as it was when it sat in the text. */
+  .mark { flex: none; width: 15px; height: 15px; border-radius: 50%; display: grid; place-items: center;
+          font-size: 10px; font-weight: 700; color: #fff; position: relative; top: -2px; }
   .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
              overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
