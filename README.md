@@ -50,7 +50,7 @@ people look at.
 
 It has run inside the LCW web wallet, in dev and production builds, with plain
 and encrypted collections (lcw-front-end#104). That pull request was closed in
-favour of the wallet's plugin interface, which this package now follows: see
+favor of the wallet's plugin interface, which this package now follows: see
 **Using it in the LCW web wallet**. No screen reader has heard it yet. See
 **Open questions**.
 
@@ -230,7 +230,7 @@ The requirements and the list of everything verification can report live in
   report, in two tiers.
 
 They live here rather than in a planning repo so they move with the code. A
-change in behaviour that leaves them untouched should look wrong in review —
+change in behavior that leaves them untouched should look wrong in review —
 which is how §4 came to describe something its own implementation no longer
 did.
 
@@ -306,7 +306,7 @@ credential names its withdrawal list by full address. They use the same test
 issuer as `dev/fixtures`, whose key comes from a fixed seed in
 `scripts/make-fixtures.js` — so it is public, and anyone can sign as it. The
 published `fixtures/registry.json` says so in its own note. It is there to show
-what a recognised issuer looks like, and must never be configured as a real
+what a recognized issuer looks like, and must never be configured as a real
 registry.
 
 ### Changing `src/outcomes.ts`
@@ -330,7 +330,7 @@ Two rules fall out of it, both learned the hard way:
   one place from the checks that came back. Writing it as fixed text is how it
   went wrong three times.
 - **Do not name a cause the log cannot establish.** A withdrawal check that
-  left no step behind might be an unrecognised status method, or verification
+  left no step behind might be an unrecognized status method, or verification
   stopping earlier. The row says "not checked" and guesses at neither.
 
 ### The test credentials
@@ -393,6 +393,6 @@ Open on the wording, and none of them are bugs:
   themselves. It is the point of that outcome and the least settled part of
   it.
 
-## Licence
+## License
 
 MIT
