@@ -1,5 +1,10 @@
 # verifier-plugin
 
+> [!IMPORTANT]
+> **Alpha.** This is part of the Learner Credential Wallet alpha, an early test
+> version. It may change without notice. We read issues, but may not answer or
+> fix them during the alpha.
+
 A credential viewer and verifier for the Digital Credentials Commons web
 wallet, built as a plugin rather than as part of the wallet itself.
 
